@@ -1,0 +1,24 @@
+{
+  "name": "Organiza",
+  "short_name": "Organiza",
+  "description": "Você fala. A gente organiza.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F7F6",
+  "theme_color": "#17624F",
+  "lang": "pt-BR",
+  "categories": ["productivity", "lifestyle", "finance"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Falar com a Nina", "url": "/nina", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Lista de compras", "url": "/casa", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

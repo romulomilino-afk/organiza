@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: organiza
+      POSTGRES_PASSWORD: organiza
+      POSTGRES_DB: organiza
+    ports:
+      - "5432:5432"
+    volumes:
+      - organiza_pg:/var/lib/postgresql/data
+
+volumes:
+  organiza_pg:
