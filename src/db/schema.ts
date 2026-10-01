@@ -178,6 +178,8 @@ export const recurringItems = pgTable("recurring_items", {
   dayOfMonth: integer("day_of_month").notNull(),
   categoryKey: text("category_key"),
   active: boolean("active").notNull().default(true),
+  /** Receitas/despesas fixas: até que dia já foram lançadas (evita lançar de novo o que o usuário apagou). */
+  generatedUntil: date("generated_until", { mode: "string" }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("recurring_user_idx").on(t.userId, t.active)]);
@@ -210,8 +212,12 @@ export const income = pgTable("income", {
   description: text("description").notNull(),
   categoryKey: text("category_key").notNull().default("outros"),
   date: date("date", { mode: "string" }).notNull(),
+  recurringItemId: text("recurring_item_id").references(() => recurringItems.id, { onDelete: "set null" }),
   createdAt: createdAt(),
-}, (t) => [index("income_user_idx").on(t.userId, t.date)]);
+}, (t) => [
+  index("income_user_idx").on(t.userId, t.date),
+  uniqueIndex("income_recurring_date_uq").on(t.recurringItemId, t.date),
+]);
 
 export const subscriptions = pgTable("subscriptions", {
   id: id(),

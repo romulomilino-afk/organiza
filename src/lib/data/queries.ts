@@ -24,23 +24,63 @@ export async function occurrences(db: DB, a: Access, from: string, to: string): 
 }
 
 /**
- * Contas recorrentes ("vence todo dia 10") viram uma despesa PENDENTE por mês.
- * Gera o mês atual e o próximo, nunca antes da data em que a conta foi cadastrada. Idempotente.
+ * Itens fixos do mês. Idempotente; roda ao abrir as telas e no "tick" do agendador.
+ * - BILL ("conta fixa"): vira uma conta PENDENTE por mês (mês atual e o próximo), para o usuário tocar em "Paguei".
+ * - INCOME ("receita fixa") e EXPENSE ("despesa fixa"): lançadas sozinhas no dia, já como recebida/paga.
+ * Nunca antes da data de cadastro; recupera no máximo 3 meses se o app ficou parado.
  */
 export async function ensureRecurringBills(db: DB, userId: string, today: string, tz: string) {
   const items = await db.select().from(recurringItems)
-    .where(and(eq(recurringItems.userId, userId), eq(recurringItems.active, true), eq(recurringItems.kind, "BILL")));
+    .where(and(eq(recurringItems.userId, userId), eq(recurringItems.active, true)));
   for (const it of items) {
     const since = todayIn(tz, it.createdAt);
-    for (const ref of [today, addMonths(monthStart(today), 1)]) {
-      const due = dateInMonth(ref, it.dayOfMonth);
-      if (due < since) continue;
-      await db.insert(expenses).values({
-        userId, description: it.name, amountCents: it.amountCents, categoryKey: it.categoryKey ?? "casa",
-        date: due, dueDate: due, status: "PENDING", recurringItemId: it.id,
-      }).onConflictDoNothing();
+    if (it.kind === "BILL") {
+      for (const ref of [today, addMonths(monthStart(today), 1)]) {
+        const due = dateInMonth(ref, it.dayOfMonth);
+        if (due < since) continue;
+        // se o dia de vencimento mudou, não cria uma segunda conta no mesmo mês
+        const [already] = await db.select({ id: expenses.id }).from(expenses).where(and(
+          eq(expenses.recurringItemId, it.id), gte(expenses.dueDate, monthStart(due)), lte(expenses.dueDate, monthEnd(due)))).limit(1);
+        if (already) continue;
+        await db.insert(expenses).values({
+          userId, description: it.name, amountCents: it.amountCents, categoryKey: it.categoryKey ?? "casa",
+          date: due, dueDate: due, status: "PENDING", recurringItemId: it.id,
+        }).onConflictDoNothing();
+      }
+      continue;
     }
+    if (it.generatedUntil && it.generatedUntil >= today) continue;
+    if (!it.amountCents) continue;
+    let start = it.generatedUntil ? addDays(it.generatedUntil, 1) : since;
+    const floor = addMonths(monthStart(today), -2);
+    if (start < floor) start = floor;
+    for (let m = monthStart(start); m <= today; m = addMonths(m, 1)) {
+      const due = dateInMonth(m, it.dayOfMonth);
+      if (due < start || due > today) continue;
+      if (it.kind === "INCOME") {
+        await db.insert(income).values({
+          userId, amountCents: it.amountCents, description: it.name, categoryKey: it.categoryKey ?? "salario",
+          date: due, recurringItemId: it.id,
+        }).onConflictDoNothing();
+      } else {
+        await db.insert(expenses).values({
+          userId, amountCents: it.amountCents, description: it.name, categoryKey: it.categoryKey ?? "casa",
+          date: due, dueDate: due, status: "PAID", paidAt: new Date(), recurringItemId: it.id,
+        }).onConflictDoNothing();
+      }
+    }
+    await db.update(recurringItems).set({ generatedUntil: today }).where(eq(recurringItems.id, it.id));
   }
+}
+
+/** Receitas, despesas e contas fixas ativas, com os totais do mês. */
+export async function fixedItems(db: DB, userId: string) {
+  const rows = await db.select().from(recurringItems)
+    .where(and(eq(recurringItems.userId, userId), eq(recurringItems.active, true)))
+    .orderBy(asc(recurringItems.dayOfMonth), asc(recurringItems.name));
+  const incomeCents = rows.filter((r) => r.kind === "INCOME").reduce((a, r) => a + (r.amountCents ?? 0), 0);
+  const expenseCents = rows.filter((r) => r.kind !== "INCOME").reduce((a, r) => a + (r.amountCents ?? 0), 0);
+  return { items: rows, incomeCents, expenseCents, leftoverCents: incomeCents - expenseCents };
 }
 
 /** Contas pendentes: as minhas e, se a família compartilha o financeiro, as da família. */

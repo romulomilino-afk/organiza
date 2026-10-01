@@ -2,7 +2,7 @@
  * Executor: aplica as ações validadas no banco, SEMPRE no escopo do usuário da sessão.
  * Ids citados pela IA são conferidos (dono = usuário, ou item compartilhado da família dele); senão, a ação é ignorada.
  */
-import { and, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, ilike, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
   events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory,
@@ -16,6 +16,13 @@ import { defaultListId } from "../data/user-setup";
 import { log } from "../logger";
 import { sharedHouseholdId, visible, type Access } from "../access";
 import { householdListId } from "../data/user-setup";
+import { ensureRecurringBills } from "../data/queries";
+
+/** Próximo dia N a partir de hoje (inclusive). */
+function nextFixedDate(today: string, day: number) {
+  const d = dateInMonth(today, day);
+  return d >= today ? d : dateInMonth(addMonths(today.slice(0, 8) + "01", 1), day);
+}
 
 import type { Card } from "./types";
 export type { Card };
@@ -139,6 +146,39 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       const amountCents = a.amount ? toCents(a.amount) : b.amountCents;
       await db.update(expenses).set({ status: "PAID", paidAt: new Date(), date: today, amountCents }).where(eq(expenses.id, b.id));
       return { icon: "✅", title: `${b.description} paga`, lines: [amountCents ? `${brl(amountCents)} registrado nas despesas` : "Marcada como paga"] };
+    }
+    case "add_fixed": {
+      const amountCents = toCents(a.amount);
+      const kind = a.kind === "income" ? "INCOME" : a.auto ? "EXPENSE" : "BILL";
+      const [it] = await db.insert(recurringItems).values({ userId, kind, name: cap(a.name), amountCents, dayOfMonth: a.day, categoryKey: a.category }).returning();
+      await ensureRecurringBills(db, userId, today, access.timezone);
+      const next = nextFixedDate(today, a.day);
+      const cat = category(a.category);
+      const label = kind === "INCOME" ? "Receita fixa" : kind === "EXPENSE" ? "Despesa fixa" : "Conta fixa";
+      const how = kind === "BILL" ? "Te aviso para pagar" : kind === "INCOME" ? "Entra sozinha nas receitas" : "Lança sozinha nas despesas";
+      return { icon: kind === "INCOME" ? "💵" : "🔁", title: `${it.name} · ${brl(amountCents)}`,
+        lines: [`${label} · todo dia ${a.day} · ${cat.emoji} ${cat.name}`, `${how} · próximo: ${next === today ? "hoje" : fmtBR(next)}`] };
+    }
+    case "update_fixed": {
+      const patch: Partial<typeof recurringItems.$inferInsert> = {};
+      if (a.amount) patch.amountCents = toCents(a.amount);
+      if (a.day) patch.dayOfMonth = a.day;
+      if (a.name) patch.name = cap(a.name);
+      if (!Object.keys(patch).length) return null;
+      const [it] = await db.update(recurringItems).set(patch).where(and(eq(recurringItems.id, a.id), eq(recurringItems.userId, userId), eq(recurringItems.active, true))).returning();
+      if (!it) return null;
+      if (it.kind === "BILL") {
+        // contas futuras ainda não pagas acompanham a mudança
+        await db.delete(expenses).where(and(eq(expenses.recurringItemId, it.id), eq(expenses.status, "PENDING"), gt(expenses.dueDate, today)));
+        await ensureRecurringBills(db, userId, today, access.timezone);
+      }
+      return { icon: "✏️", title: it.name, lines: [`${it.amountCents ? brl(it.amountCents) : "Valor a definir"} · todo dia ${it.dayOfMonth}`, "Vale a partir do próximo lançamento"] };
+    }
+    case "cancel_fixed": {
+      const [it] = await db.update(recurringItems).set({ active: false }).where(and(eq(recurringItems.id, a.id), eq(recurringItems.userId, userId))).returning();
+      if (!it) return null;
+      await db.delete(expenses).where(and(eq(expenses.recurringItemId, it.id), eq(expenses.status, "PENDING"), gt(expenses.dueDate, today)));
+      return { icon: "🗑️", title: it.name, lines: ["Não lanço mais todo mês"] };
     }
     case "add_shopping": {
       // na família, a lista de compras é compartilhada por padrão

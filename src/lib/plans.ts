@@ -30,6 +30,7 @@ export const ACTION_FEATURE: Record<string, Feature> = {
   add_reminder: "lembretes", update_reminder: "lembretes", cancel_reminder: "lembretes",
   add_shopping: "compras", remove_shopping: "compras", check_shopping: "compras",
   add_transaction: "financeiro", add_bill: "financeiro", pay_bill: "financeiro",
+  add_fixed: "financeiro", update_fixed: "financeiro", cancel_fixed: "financeiro",
   add_subscription: "assinaturas", cancel_subscription: "assinaturas",
   add_warranty: "garantias", add_document: "documentos",
   remember: "memoria",

@@ -3,7 +3,7 @@ import type { User } from "@/db/schema";
 import { addDays, DIAS, nowTimeIn, weekday } from "../dates";
 import { PLANS } from "../plans";
 import {
-  activeSubscriptions, memories, monthFinance, occurrences, openReminders, openTasks, pendingBills, shoppingOpen,
+  activeSubscriptions, fixedItems, memories, monthFinance, occurrences, openReminders, openTasks, pendingBills, shoppingOpen,
 } from "../data/queries";
 import { and, eq } from "drizzle-orm";
 import { events, householdMembers, users } from "@/db/schema";
@@ -19,7 +19,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     const d = addDays(today, i);
     calendario.push(`${d} = ${DIAS[weekday(d)]}${i === 0 ? " (HOJE)" : i === 1 ? " (amanhã)" : ""}`);
   }
-  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin] = await Promise.all([
+  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos] = await Promise.all([
     occurrences(db, access, addDays(today, -1), addDays(today, 45)),
     db.select().from(events).where(and(visible(events, access), eq(events.cancelled, false))).limit(300),
     openTasks(db, access),
@@ -29,6 +29,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     memories(db, user.id),
     activeSubscriptions(db, user.id),
     monthFinance(db, user.id, today),
+    fixedItems(db, user.id),
   ]);
 
   const seen = new Set<string>();
@@ -57,6 +58,12 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     contas_a_pagar: bills.map((b) => ({ id: b.id, name: b.description, amount: b.amountCents != null ? b.amountCents / 100 : null, due: b.dueDate })),
     lista_de_compras: shop.map((i) => i.name),
     lembretes: rems.slice(0, 40).map((r) => ({ id: r.id, text: r.text, date: r.date, time: r.time })),
+    fixos_do_mes: {
+      itens: fixos.items.map((f) => ({ id: f.id, tipo: f.kind === "INCOME" ? "receita fixa" : f.kind === "EXPENSE" ? "despesa fixa (automática)" : "conta fixa (avisa para pagar)", name: f.name, amount: f.amountCents != null ? f.amountCents / 100 : null, dia: f.dayOfMonth, category: f.categoryKey })),
+      total_receitas: fixos.incomeCents / 100,
+      total_despesas: fixos.expenseCents / 100,
+      sobra_prevista: fixos.leftoverCents / 100,
+    },
     assinaturas: subs.map((s) => ({ id: s.id, name: s.name, amount: s.amountCents / 100, cycle: s.cycle })),
     financeiro_do_mes: {
       receitas: fin.incomeCents / 100,

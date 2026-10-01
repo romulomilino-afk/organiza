@@ -1,0 +1,6 @@
+[build]
+  # aplica as migrações do banco (Neon) antes de cada publicação; é idempotente
+  command = "npm run db:migrate && npm run build"
+
+[functions]
+  node_bundler = "esbuild"

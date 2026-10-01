@@ -40,6 +40,13 @@ export const ActionSchema = z.discriminatedUnion("type", [
     dueDay: z.coerce.number().int().min(1).max(31).nullish(), dueDate: optDay, recurring: z.boolean().default(false) })
     .refine((a) => a.dueDay || a.dueDate, "conta precisa de dueDay ou dueDate"),
   z.object({ type: z.literal("pay_bill"), id: idRef, amount: optReais }),
+  // Fixos do mês: receita fixa (lança sozinha), despesa fixa (auto=true lança sozinha como paga; auto=false vira conta a pagar)
+  z.object({ type: z.literal("add_fixed"), kind: z.enum(["income", "expense"]), name: txt(80), amount: reais,
+    day: z.coerce.number().int().min(1).max(31), category: z.string().default("outros"),
+    auto: z.boolean().nullish().transform((v) => v ?? true) }),
+  z.object({ type: z.literal("update_fixed"), id: idRef, amount: optReais,
+    day: z.coerce.number().int().min(1).max(31).nullish(), name: txt(80).nullish() }),
+  z.object({ type: z.literal("cancel_fixed"), id: idRef }),
   // Compras
   z.object({ type: z.literal("add_shopping"), items }),
   z.object({ type: z.literal("remove_shopping"), items }),
@@ -94,7 +101,7 @@ export function parseNinaOutput(raw: unknown): NinaOutput {
 }
 
 function normalizeAction(a: Action): Action {
-  if (a.type === "add_transaction") {
+  if (a.type === "add_transaction" || a.type === "add_fixed") {
     const allowed: readonly string[] = a.kind === "income" ? INCOME_KEYS : EXPENSE_KEYS;
     return { ...a, category: allowed.includes(a.category) ? a.category : "outros" };
   }

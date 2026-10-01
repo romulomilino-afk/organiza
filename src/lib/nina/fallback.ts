@@ -106,6 +106,10 @@ function fallbackCore(text: string, today: string, history: { lastUser?: string;
     const d = parseDate(raw, today);
     if (t || d) return fallbackCore(`${history.lastUser} ${d ? raw : ""} ${t ? `às ${t}` : ""}`.trim(), today);
   }
+  if (history.lastAssistant && history.lastUser && /qual dia do mes/.test(norm(history.lastAssistant))) {
+    const n = s.match(/\b(\d{1,2})\b/);
+    if (n && Number(n[1]) >= 1 && Number(n[1]) <= 31) return fallbackCore(`${history.lastUser} todo dia ${n[1]}`, today);
+  }
   if (history.lastAssistant && history.lastUser && /qual (foi )?o valor|qual conta/.test(norm(history.lastAssistant))) {
     const v = parseMoney(raw) ?? (/^\d+([.,]\d{1,2})?$/.test(s) ? Number(s.replace(",", ".")) : null);
     if (v) return fallbackCore(`${history.lastUser} ${v} reais ${raw}`, today);
@@ -140,6 +144,43 @@ function fallbackCore(text: string, today: string, history: { lastUser?: string;
   return out;
 }
 
+const MONTHLY = /\b(todo (santo )?dia \d{1,2}|todo mes|todos os meses|todo começo de mes|mensalmente|por mes|fixo|fixa)\b/;
+const INCOME_FIXED = /\b(salario|recebo|ganho|renda|pensao|aposentadoria|me pagam|meu pagamento)\b/;
+const FIXED_NAMES: [RegExp, string][] = [
+  [/salario/, "Salário"], [/aposentadoria/, "Aposentadoria"], [/pensao/, "Pensão"],
+  [/aluguel/, "Aluguel"], [/condominio/, "Condomínio"], [/academia/, "Academia"], [/escola/, "Escola"],
+  [/faculdade/, "Faculdade"], [/curso/, "Curso"], [/internet/, "Internet"], [/plano de saude/, "Plano de saúde"],
+  [/financiamento/, "Financiamento"], [/parcela do carro/, "Parcela do carro"], [/parcela/, "Parcela"],
+  [/diarista|faxina/, "Diarista"], [/celular|telefone/, "Celular"], [/seguro/, "Seguro"], [/mesada/, "Mesada"],
+  [/creche/, "Creche"], [/consorcio/, "Consórcio"], [/emprestimo/, "Empréstimo"],
+];
+
+function parseFixed(raw: string, s: string): Out | null {
+  if (!MONTHLY.test(s) || /\b(vence|boleto|conta de)\b/.test(s)) return null; // contas com vencimento: regra de contas
+  const income = INCOME_FIXED.test(s);
+  const dayM = s.match(/\bdia (\d{1,2})\b/);
+  const day = dayM ? Number(dayM[1]) : null;
+  const noDay = raw.replace(/\bdia \d{1,2}\b/gi, " ");
+  let amount = parseMoney(noDay);
+  if (!amount) {
+    const m = noDay.replace(/(\d)\.(\d{3})/g, "$1$2").match(/\b(\d+(?:,\d{1,2})?)\b/);
+    amount = m ? Number(m[1].replace(",", ".")) || null : null;
+  }
+  const name = FIXED_NAMES.find(([re]) => re.test(s))?.[1] ?? (income ? "Receita fixa" : "Despesa fixa");
+  if (!day) return { reply: `Em qual dia do mês? Ex.: “todo dia 5”.`, actions: [] };
+  if (day < 1 || day > 31) return null;
+  if (!amount) return { reply: `Qual o valor ${income ? "que você recebe" : "que você paga"} todo mês?`, actions: [] };
+  if (income) {
+    return { reply: `Combinado! Todo dia ${day} eu lanço ${brl(toCents(amount))} de ${name.toLowerCase()} nas suas receitas. 💵`,
+      actions: [{ type: "add_fixed", kind: "income", name, amount, day, category: /salario/.test(s) ? "salario" : "renda_extra" }] };
+  }
+  const auto = !/(me avisa|me lembra|lembrete|avisar)/.test(s);
+  return { reply: auto
+      ? `Combinado! Todo dia ${day} eu lanço ${brl(toCents(amount))} de ${name.toLowerCase()} nas suas despesas. 🔁`
+      : `Combinado! Todo dia ${day} te aviso para pagar ${name.toLowerCase()} (${brl(toCents(amount))}). 🔔`,
+    actions: [{ type: "add_fixed", kind: "expense", name, amount, day, category: guessCategory(s), auto }] };
+}
+
 function parseClause(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {}): Out {
   const raw = text.trim();
   const s = norm(raw);
@@ -147,6 +188,10 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
   const val = parseMoney(raw), date = parseDate(raw, today), time = parseTime(raw);
   const actions: Out["actions"] = [];
   const replies: string[] = [];
+
+  // fixos do mês: "meu salário de 4200 cai todo dia 5", "pago 1500 de aluguel todo dia 10"
+  const fixed = parseFixed(raw, s);
+  if (fixed) return fixed;
 
   // receita
   if (/\b(recebi|ganhei|caiu (o )?salario)\b/.test(s)) {
@@ -201,7 +246,9 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
 
   // conta a pagar
   if (/(vence|pagar a conta|pagar o|conta de)/.test(s)) {
-    const nm = raw.match(/(conta de [a-zà-ú]+|internet|aluguel|condom[íi]nio|seguro|cart[ãa]o|iptu|ipva)/i)?.[1] ?? "Conta";
+    const util = s.match(/\b(luz|energia|agua|gas)\b/)?.[1];
+    const nm = raw.match(/(conta de [a-zà-ú]+|internet|aluguel|condom[íi]nio|seguro|cart[ãa]o|iptu|ipva)/i)?.[1]
+      ?? (util ? `Conta de ${{ luz: "luz", energia: "luz", agua: "água", gas: "gás" }[util]}` : "Conta");
     const dd = s.match(/todo dia (\d{1,2})/);
     if (dd) return { reply: `Anotei: ${cap(nm)} vence todo dia ${dd[1]}. Te aviso antes. 🔔`, actions: [
       { type: "add_bill", name: cap(nm), dueDay: Number(dd[1]), recurring: true, amount: val ?? undefined },
