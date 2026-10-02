@@ -5,12 +5,15 @@
 import { and, eq, gt, ilike, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
-  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory,
+  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories,
 } from "@/db/schema";
 import type { Action } from "./actions";
 import { addMonths, cap, dateInMonth, fmtBR, fmtLong, relDay } from "../dates";
 import { brl, METHOD_LABEL, toCents } from "../money";
-import { category } from "../categories";
+import { CATEGORIES } from "../categories";
+import { loadCategories, moveByKeywords, slugKey, upsertCategory } from "../data/user-categories";
+
+const isDefaultKey = (name: string) => slugKey(name) in CATEGORIES;
 import { recurrenceLabel } from "../recurrence";
 import { defaultListId } from "../data/user-setup";
 import { log } from "../logger";
@@ -47,6 +50,7 @@ export async function executeActions(db: DB, access: Access, today: string, acti
 /** Retorna o cartão de confirmação, `undefined` (executou sem cartão) ou `null` (ignorada). */
 async function runOne(db: DB, access: Access, today: string, a: Action, created: string[]): Promise<Card | undefined | null> {
   const userId = access.userId;
+  const cats = () => loadCategories(db, userId);
   const hh = sharedHouseholdId(access);
   const famTag = (shared: boolean) => (shared ? ["👨‍👩‍👧 Família"] : []);
   switch (a.type) {
@@ -117,27 +121,30 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
     case "add_transaction": {
       const cents = toCents(a.amount);
       const date = a.date ?? today;
-      const cat = category(a.category);
+      const uc = await cats();
+      const catKey = uc.resolve(a.category, a.description, a.kind === "income" ? "INCOME" : "EXPENSE");
+      const cat = uc.get(catKey);
       if (a.kind === "income") {
-        await db.insert(income).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: a.category, date });
+        await db.insert(income).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: catKey, date });
         return { icon: "💵", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name} · Receita`] };
       }
       const method = a.method ? (a.method.toUpperCase() as "CARTAO" | "PIX" | "DINHEIRO" | "DEBITO" | "BOLETO") : null;
       const sharedFin = !!(a.shared && hh && access.household?.shareFinance);
-      await db.insert(expenses).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: a.category, method, date, status: "PAID", paidAt: new Date(), householdId: sharedFin ? hh : null });
+      await db.insert(expenses).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: catKey, method, date, status: "PAID", paidAt: new Date(), householdId: sharedFin ? hh : null });
       return { icon: "💰", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name}${method ? ` · ${METHOD_LABEL[method]}` : ""} · Despesa`, ...famTag(sharedFin)] };
     }
     case "add_bill": {
       const amountCents = a.amount ? toCents(a.amount) : null;
+      const billCat = (await cats()).matchKeyword(a.name, "EXPENSE")?.key ?? "casa";
       if (a.dueDay) {
-        const [it] = await db.insert(recurringItems).values({ userId, kind: "BILL", name: cap(a.name), amountCents, dayOfMonth: a.dueDay, categoryKey: "casa" }).returning();
+        const [it] = await db.insert(recurringItems).values({ userId, kind: "BILL", name: cap(a.name), amountCents, dayOfMonth: a.dueDay, categoryKey: billCat }).returning();
         let due = dateInMonth(today, a.dueDay);
         if (due < today) due = dateInMonth(addMonths(today.slice(0, 8) + "01", 1), a.dueDay);
-        await db.insert(expenses).values({ userId, description: it.name, amountCents, categoryKey: "casa", date: due, dueDate: due, status: "PENDING", recurringItemId: it.id }).onConflictDoNothing();
+        await db.insert(expenses).values({ userId, description: it.name, amountCents, categoryKey: billCat, date: due, dueDate: due, status: "PENDING", recurringItemId: it.id }).onConflictDoNothing();
         return { icon: "🧾", title: it.name, lines: [`Vence todo dia ${a.dueDay}${amountCents ? ` · ${brl(amountCents)}` : ""}`, `Próximo: ${fmtBR(due)}`] };
       }
       const due = a.dueDate!;
-      await db.insert(expenses).values({ userId, description: cap(a.name), amountCents, categoryKey: "casa", date: due, dueDate: due, status: "PENDING" });
+      await db.insert(expenses).values({ userId, description: cap(a.name), amountCents, categoryKey: billCat, date: due, dueDate: due, status: "PENDING" });
       return { icon: "🧾", title: cap(a.name), lines: [`Vence ${relDay(due, today).toLowerCase()}${amountCents ? ` · ${brl(amountCents)}` : ""}`] };
     }
     case "pay_bill": {
@@ -150,10 +157,12 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
     case "add_fixed": {
       const amountCents = toCents(a.amount);
       const kind = a.kind === "income" ? "INCOME" : a.auto ? "EXPENSE" : "BILL";
-      const [it] = await db.insert(recurringItems).values({ userId, kind, name: cap(a.name), amountCents, dayOfMonth: a.day, categoryKey: a.category }).returning();
+      const uc = await cats();
+      const catKey = uc.resolve(a.category, a.name, a.kind === "income" ? "INCOME" : "EXPENSE");
+      const [it] = await db.insert(recurringItems).values({ userId, kind, name: cap(a.name), amountCents, dayOfMonth: a.day, categoryKey: catKey }).returning();
       await ensureRecurringBills(db, userId, today, access.timezone);
       const next = nextFixedDate(today, a.day);
-      const cat = category(a.category);
+      const cat = uc.get(catKey);
       const label = kind === "INCOME" ? "Receita fixa" : kind === "EXPENSE" ? "Despesa fixa" : "Conta fixa";
       const how = kind === "BILL" ? "Te aviso para pagar" : kind === "INCOME" ? "Entra sozinha nas receitas" : "Lança sozinha nas despesas";
       return { icon: kind === "INCOME" ? "💵" : "🔁", title: `${it.name} · ${brl(amountCents)}`,
@@ -179,6 +188,28 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       if (!it) return null;
       await db.delete(expenses).where(and(eq(expenses.recurringItemId, it.id), eq(expenses.status, "PENDING"), gt(expenses.dueDate, today)));
       return { icon: "🗑️", title: it.name, lines: ["Não lanço mais todo mês"] };
+    }
+    case "add_category": {
+      const uc = await cats();
+      const kind = a.kind === "income" ? "INCOME" : "EXPENSE";
+      if (!uc.find(a.name) && uc.custom().length >= 30) return null;
+      const { cat, created: isNew } = await upsertCategory(db, userId, uc, { name: a.name, emoji: a.emoji, kind, keywords: a.keywords.length ? a.keywords : isDefaultKey(a.name) ? [] : [a.name] });
+      const moved = await moveByKeywords(db, userId, cat);
+      const lines = [
+        cat.keywords.length ? `Entra aqui: ${cat.keywords.join(", ")}` : "Use quando quiser: “gastei 50 em " + cat.name.toLowerCase() + "”",
+        ...(moved ? [`${moved} lançamento${moved > 1 ? "s" : ""} movido${moved > 1 ? "s" : ""} para cá`] : []),
+      ];
+      return { icon: cat.emoji, title: isNew ? `Categoria ${cat.name} criada` : `Categoria ${cat.name} atualizada`, lines };
+    }
+    case "delete_category": {
+      const uc = await cats();
+      const c = uc.find(a.name);
+      if (!c || !c.custom) return null;
+      await db.update(expenses).set({ categoryKey: "outros" }).where(and(eq(expenses.userId, userId), eq(expenses.categoryKey, c.key)));
+      await db.update(income).set({ categoryKey: "renda_extra" }).where(and(eq(income.userId, userId), eq(income.categoryKey, c.key)));
+      await db.update(recurringItems).set({ categoryKey: c.kind === "INCOME" ? "renda_extra" : "outros" }).where(and(eq(recurringItems.userId, userId), eq(recurringItems.categoryKey, c.key)));
+      await db.delete(categories).where(and(eq(categories.userId, userId), eq(categories.key, c.key)));
+      return { icon: "🗑️", title: `Categoria ${c.name} apagada`, lines: [`Os lançamentos dela foram para ${c.kind === "INCOME" ? "Renda extra" : "Outros"}`] };
     }
     case "add_shopping": {
       // na família, a lista de compras é compartilhada por padrão

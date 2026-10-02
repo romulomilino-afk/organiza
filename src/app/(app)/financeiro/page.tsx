@@ -3,7 +3,8 @@ import { getDb } from "@/db";
 import { requirePageAccess } from "@/lib/session";
 import { MESES, relDay, todayIn, fmtShort } from "@/lib/dates";
 import { brl, METHOD_LABEL } from "@/lib/money";
-import { category } from "@/lib/categories";
+import { loadCategories } from "@/lib/data/user-categories";
+import { addCategoryForm, deleteCategory } from "@/actions/categories";
 import { hasFeature, type PlanId } from "@/lib/plans";
 import { activeSubscriptions, ensureRecurringBills, fixedItems, householdFinance, monthFinance, pendingBills } from "@/lib/data/queries";
 import { addFixed, cancelFixed } from "@/actions/fixed";
@@ -27,7 +28,9 @@ export default async function FinanceiroPage() {
   const db = getDb();
   const today = todayIn(user.timezone);
   await ensureRecurringBills(db, user.id, today, user.timezone);
-  const [fin, bills, subs, fam, fixos] = await Promise.all([monthFinance(db, user.id, today), pendingBills(db, access), activeSubscriptions(db, user.id), householdFinance(db, access, today), fixedItems(db, user.id)]);
+  const [fin, bills, subs, fam, fixos, ucats] = await Promise.all([monthFinance(db, user.id, today), pendingBills(db, access), activeSubscriptions(db, user.id), householdFinance(db, access, today), fixedItems(db, user.id), loadCategories(db, user.id)]);
+  const category = (k: string | null | undefined) => ucats.get(k);
+  const myCats = ucats.list.filter((c) => c.custom || c.keywords.length);
 
   const cats = Object.entries(fin.byCategory).sort((a, b) => b[1] - a[1]);
   const maxC = cats[0]?.[1] ?? 1;
@@ -120,6 +123,36 @@ export default async function FinanceiroPage() {
               <div className="col-span-2 h-2 overflow-hidden rounded-full bg-surface-2"><i className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(3, (v / maxC) * 100)}%` }} /></div>
             </div>
           )) : <Empty>Sem despesas este mês. Diga “gastei 45 reais no almoço”.</Empty>}
+        </div>
+
+        <div className="card">
+          <div className="eyebrow mb-1">🏷️ Minhas categorias</div>
+          {myCats.length ? myCats.map((c) => (
+            <div key={c.key} className="row">
+              <span className="text-xl">{c.emoji}</span>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{c.name}{c.kind === "INCOME" ? <span className="ml-2 text-[12px] font-semibold text-good">receita</span> : null}</div>
+                <div className="text-[13px] text-ink-3 [overflow-wrap:anywhere]">{c.keywords.length ? `Entra aqui: ${c.keywords.join(", ")}` : "Sem palavras-chave"}</div>
+              </div>
+              {c.custom && <XButton action={deleteCategory.bind(null, c.name)} label={`Apagar categoria ${c.name}`} />}
+            </div>
+          )) : <Empty>Crie as suas falando com a Nina: “barbearia vai na categoria Beleza” ou “cria a categoria Pet com ração e veterinário”.</Empty>}
+          <details className="mt-2 border-t border-line pt-2">
+            <summary className="cursor-pointer py-1 text-sm font-semibold text-accent">+ Nova categoria</summary>
+            <form action={addCategoryForm} className="mt-2 flex flex-col gap-2">
+              <div className="grid grid-cols-[4.5rem_1fr] gap-2">
+                <input name="emoji" maxLength={8} placeholder="🏷️" className="field text-center" aria-label="Emoji" />
+                <input name="name" required maxLength={40} placeholder="Nome (ex.: Beleza)" className="field" aria-label="Nome da categoria" />
+              </div>
+              <input name="keywords" maxLength={400} placeholder="O que entra nela (ex.: barbearia, manicure)" className="field" aria-label="Palavras-chave" />
+              <select name="kind" className="field" defaultValue="expense" aria-label="Tipo">
+                <option value="expense">Categoria de despesa</option>
+                <option value="income">Categoria de receita</option>
+              </select>
+              <button className="btn">Salvar</button>
+              <p className="text-[13px] text-ink-3">Os lançamentos antigos com essas palavras mudam de categoria na hora.</p>
+            </form>
+          </details>
         </div>
 
         {fam && (

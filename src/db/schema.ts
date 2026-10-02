@@ -166,6 +166,8 @@ export const categories = pgTable("categories", {
   name: text("name").notNull(),
   emoji: text("emoji").notNull(),
   kind: categoryKindEnum("kind").notNull(),
+  /** Palavras que mandam um lançamento para esta categoria (ex.: "barbearia" → Beleza). Só nas categorias do usuário. */
+  keywords: text("keywords").array().notNull().default([]),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("categories_user_key_uq").on(t.userId, t.key)]);
 

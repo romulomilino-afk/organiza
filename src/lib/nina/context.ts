@@ -8,6 +8,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { events, householdMembers, users } from "@/db/schema";
 import { visible, type Access } from "../access";
+import { loadCategories } from "../data/user-categories";
 
 /**
  * Tudo que a Nina precisa saber para interpretar a mensagem — só do próprio usuário.
@@ -19,7 +20,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     const d = addDays(today, i);
     calendario.push(`${d} = ${DIAS[weekday(d)]}${i === 0 ? " (HOJE)" : i === 1 ? " (amanhã)" : ""}`);
   }
-  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos] = await Promise.all([
+  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats] = await Promise.all([
     occurrences(db, access, addDays(today, -1), addDays(today, 45)),
     db.select().from(events).where(and(visible(events, access), eq(events.cancelled, false))).limit(300),
     openTasks(db, access),
@@ -30,7 +31,10 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     activeSubscriptions(db, user.id),
     monthFinance(db, user.id, today),
     fixedItems(db, user.id),
+    loadCategories(db, user.id),
   ]);
+  const catOut = (c: { key: string; name: string; custom: boolean; keywords: string[] }) =>
+    ({ key: c.key, name: c.name, ...(c.custom ? { criada_pelo_usuario: true } : {}), ...(c.keywords.length ? { palavras: c.keywords } : {}) });
 
   const seen = new Set<string>();
   const compromissos = occ.filter((o) => { const k = `${o.event.id}:${o.day}`; if (seen.has(k)) return false; seen.add(k); return true; })
@@ -58,6 +62,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     contas_a_pagar: bills.map((b) => ({ id: b.id, name: b.description, amount: b.amountCents != null ? b.amountCents / 100 : null, due: b.dueDate })),
     lista_de_compras: shop.map((i) => i.name),
     lembretes: rems.slice(0, 40).map((r) => ({ id: r.id, text: r.text, date: r.date, time: r.time })),
+    categorias: { despesa: cats.expense().map(catOut), receita: cats.income().map(catOut) },
     fixos_do_mes: {
       itens: fixos.items.map((f) => ({ id: f.id, tipo: f.kind === "INCOME" ? "receita fixa" : f.kind === "EXPENSE" ? "despesa fixa (automática)" : "conta fixa (avisa para pagar)", name: f.name, amount: f.amountCents != null ? f.amountCents / 100 : null, dia: f.dayOfMonth, category: f.categoryKey })),
       total_receitas: fixos.incomeCents / 100,

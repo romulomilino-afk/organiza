@@ -14,6 +14,7 @@ import { parseNinaOutput, type Action, type Suggestion } from "./actions";
 import { executeActions, type Card } from "./executor";
 import { ACTION_FEATURE, hasFeature, PLANS, type PlanId } from "../plans";
 import { ensureRecurringBills } from "../data/queries";
+import { loadCategories } from "../data/user-categories";
 import { activeConversationId } from "../data/user-setup";
 import { monthKey, todayIn } from "../dates";
 import { AppError } from "../errors";
@@ -89,7 +90,8 @@ export async function handleMessage(db: DB, user: User, text: string, source: "T
   if (!out) {
     const lastA = [...history].reverse().find((m) => m.role === "ASSISTANT");
     const lastU = [...history].reverse().find((m) => m.role === "USER");
-    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active }));
+    const cats = await loadCategories(db, user.id);
+    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list }));
   }
 
   const { allowed, note } = gateByPlan(plan, out.actions);

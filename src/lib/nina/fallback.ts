@@ -87,8 +87,23 @@ function stripDateWords(s: string) {
     .replace(/\s{2,}/g, " ").trim();
 }
 
-export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {}, opts: { family?: boolean } = {}): Out {
-  const out = fallbackCore(text, today, history);
+type UserCat = { key: string; name: string; kind: "EXPENSE" | "INCOME"; keywords: string[] };
+/** Categorias da pessoa durante a interpretação (a função é síncrona, então não há mistura entre usuários). */
+let userCats: UserCat[] = [];
+function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
+  let best: { c: UserCat; n: number } | null = null;
+  for (const c of userCats) if (c.kind === kind) for (const k of c.keywords) {
+    const kw = norm(k);
+    if (kw.length >= 3 && s.includes(kw) && (!best || kw.length > best.n)) best = { c, n: kw.length };
+  }
+  return best?.c ?? null;
+}
+const catName = (key: string) => userCats.find((c) => c.key === key)?.name ?? CAT_NAME[key] ?? "Outros";
+
+export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {}, opts: { family?: boolean; categories?: UserCat[] } = {}): Out {
+  userCats = opts.categories ?? [];
+  let out: Out;
+  try { out = fallbackCore(text, today, history); } finally { userCats = []; }
   // na família: "a gente", "família", "casa", "nós"… compartilha compromissos e tarefas
   if (opts.family && /\b(familia|família|a gente|nós|nos vamos|compartilh|todo mundo|lá em casa)\b/i.test(text)) {
     for (const a of out.actions) if (a.type === "add_event" || a.type === "add_task") a.shared = true;
@@ -144,6 +159,48 @@ function fallbackCore(text: string, today: string, history: { lastUser?: string;
   return out;
 }
 
+const EMOJI: [RegExp, string][] = [
+  [/barbe|cabel/, "💈"], [/academia|treino|crossfit|pilates/, "🏋️"], [/pet|cachorro|gato|racao|veterin/, "🐶"],
+  [/beleza|manicure|unha|salao|estetica/, "💅"], [/bebe|filho|crianca|fralda/, "👶"], [/igreja|dizimo|oferta/, "⛪"],
+  [/presente/, "🎁"], [/viage|passage|hotel/, "✈️"], [/mercado|feira/, "🛒"], [/bar\b|cerveja|bebida/, "🍺"],
+  [/cafe/, "☕"], [/farmacia|remedio/, "💊"], [/carro|combust|gasolina/, "🚗"], [/moto/, "🏍️"],
+  [/investiment|reserva|poupanca/, "📈"], [/freela|bico|venda/, "💼"], [/jogo|game/, "🎮"], [/roupa/, "👕"], [/educa|curso|escola/, "🎓"],
+];
+const pickEmoji = (t: string) => EMOJI.find(([re]) => re.test(norm(t)))?.[1] ?? "🏷️";
+const splitWords = (t: string) => t.split(/,|\s+e\s+|\s+ou\s+|\//i).map((x) => x.trim().replace(/^(o|a|os|as|de|do|da|meu|minha|meus|minhas)\s+/i, "").replace(/[.!?]+$/, "")).filter((x) => x.length >= 3 && x.length <= 40);
+const cleanName = (t: string) => t.trim().replace(/^["“']|["”'.!?]+$/g, "").replace(/^(de|da|do|chamada|com nome( de)?)\s+/i, "").trim();
+
+function parseCategory(raw: string, s: string): Out | null {
+  if (!/\bcategoria/.test(s)) return null;
+  const del = raw.match(/\b(?:apag\w*|exclu\w*|remov\w*|delet\w*|tir\w*)\s+(?:a\s+)?categoria\s+(.+)/i);
+  if (del) {
+    const name = cleanName(del[1]);
+    return { reply: `Pronto, apaguei a categoria ${name}. Os lançamentos dela foram para Outros. 🗑️`, actions: [{ type: "delete_category", name }] };
+  }
+  const kind = /categoria de (receita|entrada|ganho)/.test(s) ? "income" : "expense";
+  const create = raw.match(/\b(?:cri\w*|nova|novo|adicion\w*|faz\w*|monta\w*|quero)\s+(?:a\s+|uma\s+)?(?:nova\s+)?categoria\s+(?:de\s+(?:receita|entrada|ganho|despesa|gasto)s?\s+)?(.+)/i);
+  if (create) {
+    const [namePart, kwPart] = create[1].split(/\s+(?:com|para|pra|que tenha|incluindo)\s+/i);
+    const name = cleanName(namePart);
+    if (!name || name.length > 40) return { reply: "Qual o nome da categoria? Ex.: “cria a categoria Beleza”.", actions: [] };
+    const keywords = kwPart ? splitWords(kwPart) : [];
+    return { reply: `Categoria ${name} criada! ${keywords.length ? `${cap(keywords.join(", "))} já entra${keywords.length > 1 ? "m" : ""} nela.` : `Agora me diga o que entra nela, por exemplo: “${kind === "income" ? "freela" : "barbearia"} vai na categoria ${name}”.`} ${pickEmoji(name + " " + keywords.join(" "))}`,
+      actions: [{ type: "add_category", name, emoji: pickEmoji(name + " " + keywords.join(" ")), kind, keywords }] };
+  }
+  // "barbearia vai na categoria Beleza", "coloca academia na categoria Academia", "manicure é da categoria Beleza"
+  const assign = raw.match(/^(.+?)\s+(?:(?:vai|vão|entra|entram|fica|ficam|é|e|são|sao|passa a ser|deve ir)\s+)?(?:(?:na|no|em|para|pra|da|de|dentro da)\s+)?(?:a\s+)?categoria\s+(?:de\s+)?(.+)$/i);
+  if (assign) {
+    const left = assign[1].replace(/^(?:coloca\w*|põe|poe|bota\w*|manda\w*|joga\w*|muda\w*|move\w*|lança\w*|lanca\w*)\s+/i, "")
+      .replace(/\s+(?:vai|entra|fica|é|e)$/i, "").replace(/^(?:os gastos (?:de|da|do|com)|gastos (?:de|da|do|com)|o gasto (?:de|da|do|com))\s+/i, "");
+    const keywords = splitWords(left);
+    const name = cleanName(assign[2]);
+    if (!keywords.length || !name) return null;
+    return { reply: `Combinado! ${cap(keywords.join(", "))} agora entra${keywords.length > 1 ? "m" : ""} na categoria ${name}, inclusive o que já foi lançado. ${pickEmoji(name + " " + keywords.join(" "))}`,
+      actions: [{ type: "add_category", name, emoji: pickEmoji(name + " " + keywords.join(" ")), kind, keywords }] };
+  }
+  return null;
+}
+
 const MONTHLY = /\b(todo (santo )?dia \d{1,2}|todo mes|todos os meses|todo começo de mes|mensalmente|por mes|fixo|fixa)\b/;
 const INCOME_FIXED = /\b(salario|recebo|ganho|renda|pensao|aposentadoria|me pagam|meu pagamento)\b/;
 const FIXED_NAMES: [RegExp, string][] = [
@@ -189,6 +246,10 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
   const actions: Out["actions"] = [];
   const replies: string[] = [];
 
+  // categorias: "cria a categoria Beleza", "barbearia vai na categoria Beleza", "apaga a categoria Beleza"
+  const catCmd = parseCategory(raw, s);
+  if (catCmd) return catCmd;
+
   // fixos do mês: "meu salário de 4200 cai todo dia 5", "pago 1500 de aluguel todo dia 10"
   const fixed = parseFixed(raw, s);
   if (fixed) return fixed;
@@ -208,14 +269,14 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
       }
       return { reply: "Qual foi o valor?", actions: [] };
     }
-    const cat = guessCategory(s);
+    const cat = matchUserCat(s, "EXPENSE")?.key ?? guessCategory(s);
     const method = /cartao|credito/.test(s) ? "cartao" : /\bpix\b/.test(s) ? "pix" : /dinheiro/.test(s) ? "dinheiro" : /debito/.test(s) ? "debito" : undefined;
     const descMatch = raw.match(/(?:comprei|gastei|paguei)\s+(?:(?:r\$\s*)?[\d.,]+\s*(?:reais|real)?\s*)?(?:com |no |na |em |de |um |uma |o |a )?([^\d,.]{3,40}?)(?:\s+(?:por|hoje|no cart|com|de)\b|\s+r\$|\s+\d|[,.]|$)/i);
-    const description = cap(descMatch?.[1]?.replace(/^(no|na|em|um|uma|o|a)\s+/i, "") || CAT_NAME[cat]);
+    const description = cap(descMatch?.[1]?.replace(/^(no|na|em|um|uma|o|a)\s+/i, "") || catName(cat));
     actions.push({ type: "add_transaction", kind: "expense", amount: val, category: cat, description, method });
     const durable = /(ar-condicionado|geladeira|fogao|\btv\b|televis|notebook|celular|maquina de lavar|sofa)/.test(s);
     return {
-      reply: `Registrei ${brl(toCents(val))} em ${CAT_NAME[cat]}. ✅`,
+      reply: `Registrei ${brl(toCents(val))} em ${catName(cat)}. ✅`,
       actions,
       suggestion: durable ? { text: "Quer cadastrar a garantia?", yes: "Sim", no: "Não precisa", action: null } : null,
     };

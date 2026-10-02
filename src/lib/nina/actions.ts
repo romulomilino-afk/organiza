@@ -4,7 +4,6 @@
  */
 import { z } from "zod";
 import { isISODate, isTime } from "../dates";
-import { EXPENSE_KEYS, INCOME_KEYS } from "../categories";
 
 const txt = (max = 160) => z.string().trim().min(1).max(max);
 const day = z.string().refine(isISODate, "data inválida (YYYY-MM-DD)");
@@ -47,6 +46,11 @@ export const ActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("update_fixed"), id: idRef, amount: optReais,
     day: z.coerce.number().int().min(1).max(31).nullish(), name: txt(80).nullish() }),
   z.object({ type: z.literal("cancel_fixed"), id: idRef }),
+  // Categorias do usuário ("cria a categoria Beleza", "barbearia vai na categoria Beleza")
+  z.object({ type: z.literal("add_category"), name: txt(40), emoji: z.string().max(8).nullish(),
+    kind: z.enum(["expense", "income"]).nullish().transform((v) => v ?? "expense"),
+    keywords: z.array(txt(40)).max(20).nullish().transform((v) => v ?? []) }),
+  z.object({ type: z.literal("delete_category"), name: txt(40) }),
   // Compras
   z.object({ type: z.literal("add_shopping"), items }),
   z.object({ type: z.literal("remove_shopping"), items }),
@@ -101,10 +105,7 @@ export function parseNinaOutput(raw: unknown): NinaOutput {
 }
 
 function normalizeAction(a: Action): Action {
-  if (a.type === "add_transaction" || a.type === "add_fixed") {
-    const allowed: readonly string[] = a.kind === "income" ? INCOME_KEYS : EXPENSE_KEYS;
-    return { ...a, category: allowed.includes(a.category) ? a.category : "outros" };
-  }
+  // a categoria final (padrão ou do usuário) é decidida no executor, que conhece as categorias da pessoa
   return a;
 }
 
