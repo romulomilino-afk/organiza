@@ -14,6 +14,7 @@ export function computeAlerts(input: {
   today: string; tz: string;
   events: Event[]; bills: Expense[]; tasks: Task[]; shopping: ShoppingItem[]; reminders: Reminder[];
   docs?: Document[]; warranties?: Warranty[];
+  invoices?: { cardId: string; cardName: string; dueDate: string; totalCents: number }[];
 }): Alert[] {
   const { today, tz } = input;
   const out: Alert[] = [];
@@ -38,6 +39,15 @@ export function computeAlerts(input: {
     if (n < 0) out.push({ key: `bill:${b.id}`, kind: "bill_late", icon: "⚠️", level: "bad", weight: 6, text: `${b.description} venceu ${n === -1 ? "ontem" : `há ${-n} dias`}${v}.` });
     else if (n === 0) out.push({ key: `bill:${b.id}:0`, kind: "bill_due", icon: "⚠️", level: "bad", weight: 5, text: `${b.description} vence hoje${v}.` });
     else if (n <= 2) out.push({ key: `bill:${b.id}:${n}`, kind: "bill_due", icon: "⚠️", level: "warn", weight: 4, text: `${b.description} vence ${n === 1 ? "amanhã" : "em 2 dias"}${v}.` });
+  }
+
+  for (const f of input.invoices ?? []) {
+    const n = diffDays(today, f.dueDate);
+    const k = `inv:${f.cardId}:${f.dueDate}`;
+    const v = ` (${brl(f.totalCents)})`;
+    if (n < 0) out.push({ key: k, kind: "bill_late", icon: "💳", level: "bad", weight: 6, text: `A fatura do ${f.cardName} venceu ${n === -1 ? "ontem" : `há ${-n} dias`}${v}.` });
+    else if (n === 0) out.push({ key: `${k}:0`, kind: "bill_due", icon: "💳", level: "bad", weight: 5, text: `A fatura do ${f.cardName} vence hoje${v}.` });
+    else if (n <= 3) out.push({ key: `${k}:${n}`, kind: "bill_due", icon: "💳", level: "warn", weight: 4, text: `A fatura do ${f.cardName} vence ${n === 1 ? "amanhã" : `em ${n} dias`}${v}.` });
   }
 
   const late = input.tasks.filter((t) => t.dueDate && t.dueDate < today);

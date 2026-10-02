@@ -9,6 +9,7 @@ import { and, eq } from "drizzle-orm";
 import { events, householdMembers, users } from "@/db/schema";
 import { visible, type Access } from "../access";
 import { loadCategories } from "../data/user-categories";
+import { cardsOverview } from "../cards";
 
 /**
  * Tudo que a Nina precisa saber para interpretar a mensagem — só do próprio usuário.
@@ -20,7 +21,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     const d = addDays(today, i);
     calendario.push(`${d} = ${DIAS[weekday(d)]}${i === 0 ? " (HOJE)" : i === 1 ? " (amanhã)" : ""}`);
   }
-  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats] = await Promise.all([
+  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats, cards] = await Promise.all([
     occurrences(db, access, addDays(today, -1), addDays(today, 45)),
     db.select().from(events).where(and(visible(events, access), eq(events.cancelled, false))).limit(300),
     openTasks(db, access),
@@ -32,6 +33,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     monthFinance(db, user.id, today),
     fixedItems(db, user.id),
     loadCategories(db, user.id),
+    cardsOverview(db, user.id, today),
   ]);
   const catOut = (c: { key: string; name: string; custom: boolean; keywords: string[] }) =>
     ({ key: c.key, name: c.name, ...(c.custom ? { criada_pelo_usuario: true } : {}), ...(c.keywords.length ? { palavras: c.keywords } : {}) });
@@ -63,6 +65,14 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     lista_de_compras: shop.map((i) => i.name),
     lembretes: rems.slice(0, 40).map((r) => ({ id: r.id, text: r.text, date: r.date, time: r.time })),
     categorias: { despesa: cats.expense().map(catOut), receita: cats.income().map(catOut) },
+    cartoes: cards.map((c) => ({
+      nome: c.card.name, fecha_dia: c.card.closingDay, vence_dia: c.card.dueDay, melhor_dia_de_compra: c.best.day,
+      hoje_e_bom_para_comprar: c.best.goodNow, limite: c.card.limitCents != null ? c.card.limitCents / 100 : null, limite_usado: c.usedCents / 100,
+      fatura_a_pagar: c.toPay ? { vencimento: c.toPay.dueDate, total: c.toPay.totalCents / 100, status: c.toPay.status } : null,
+      fatura_aberta: c.open ? { vencimento: c.open.dueDate, fecha_em: c.open.closingDate, total_ate_agora: c.open.totalCents / 100 } : null,
+      proximas_faturas: c.upcoming.map((i) => ({ vencimento: i.dueDate, total: i.totalCents / 100 })),
+      compras_parceladas: c.purchases.slice(0, 25).map((p) => ({ id: p.purchaseId, descricao: p.description, parcela_atual: `${p.next}/${p.of}`, valor_parcela: p.amountCents / 100, faltam: p.remaining, ultima_fatura: p.lastDue })),
+    })),
     fixos_do_mes: {
       itens: fixos.items.map((f) => ({ id: f.id, tipo: f.kind === "INCOME" ? "receita fixa" : f.kind === "EXPENSE" ? "despesa fixa (automática)" : "conta fixa (avisa para pagar)", name: f.name, amount: f.amountCents != null ? f.amountCents / 100 : null, dia: f.dayOfMonth, category: f.categoryKey })),
       total_receitas: fixos.incomeCents / 100,

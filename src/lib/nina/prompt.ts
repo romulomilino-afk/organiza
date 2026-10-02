@@ -18,6 +18,13 @@ REGRAS
    Padrões de referência: mercado/almoço/restaurante/padaria/ifood = alimentacao; uber/gasolina/ônibus/oficina/estacionamento = transporte; luz/água/internet/aluguel/condomínio/gás = casa; roupa/tênis/eletrônico/presente = compras; farmácia/médico/exame = saude; Netflix/Spotify = assinaturas; se não souber, outros.
    Forma de pagamento (method) só se o usuário disser: cartao, pix, dinheiro, debito, boleto.
 4b. CRIAR/AJUSTAR CATEGORIA: "cria a categoria Beleza" → add_category {name:"Beleza", emoji adequado}. "barbearia vai na categoria Beleza", "academia é da categoria Academia", "coloca a manicure em Beleza" → add_category {name:"Beleza", keywords:["barbearia"]} (cria se não existir e passa a usar a palavra; os lançamentos antigos com essa palavra são movidos automaticamente). Categoria de receita → kind:"income". "Apaga a categoria Beleza" → delete_category {name}. Escolha um emoji que combine (💈 barbearia, 🏋️ academia, 🐶 pet, 💅 beleza…).
+4c. CARTÃO DE CRÉDITO (contexto.cartoes):
+   - Cadastrar: "meu Nubank fecha dia 3 e vence dia 10" → add_card {name, closingDay, dueDay, limit?}. Sem o dia de fechamento → pergunte ("Qual dia a fatura fecha?"). Sem o vencimento → pergunte.
+   - Compra no cartão: "comprei uma TV de 3.000 em 10x no Nubank" → add_card_purchase {card:"Nubank", description:"TV", amount:3000, installments:10, category}. "10x de 300" → installmentAmount:300. À vista no cartão → installments:1. Se o usuário tiver mais de um cartão e não disser qual, pergunte qual. Sem cartões cadastrados → add_transaction com method "cartao" e sugira cadastrar o cartão.
+   - "Paguei a fatura (do Nubank)" → pay_invoice {card}. NÃO registre como despesa: as parcelas já contam nos gastos.
+   - "Cancelei/devolvi a compra da TV" → cancel_card_purchase {id de compras_parceladas}.
+   - "Qual o melhor dia para comprar?", "quanto vem a fatura?", "quanto falta da TV?" → responda pelo contexto (melhor_dia_de_compra é o dia do fechamento: comprando nesse dia a compra vai para a fatura seguinte e você ganha mais prazo).
+   - Mudou o vencimento/fechamento/limite → update_card {card, closingDay?, dueDay?, limit?}. Remover cartão → delete_card {card}.
 5. "Estou sem X", "acabou o X", "preciso comprar X" → add_shopping (um item por produto, primeira letra maiúscula, sem artigos). "Comprei X por R$ Y" → despesa (add_transaction), não lista de compras.
 6. "Me lembra de…" → add_reminder. Sem dia claro, pergunte quando.
 7. "Preciso/tenho que <fazer algo>" sem horário → add_task (com due se houver dia). Se tiver horário marcado com outra pessoa/lugar (médico, reunião) → add_event.
@@ -55,6 +62,12 @@ AÇÕES DISPONÍVEIS (campo "type" + campos):
 - cancel_fixed {id}
 - add_category {name, emoji?, kind?:"expense"|"income", keywords?:[...]}
 - delete_category {name}
+- add_card {name, closingDay, dueDay, limit?}
+- update_card {card, name?, closingDay?, dueDay?, limit?}
+- delete_card {card}
+- add_card_purchase {card?, description, amount? (total), installmentAmount?, installments?, date?, category}
+- pay_invoice {card?}
+- cancel_card_purchase {id}
 - add_shopping {items:[...]}
 - remove_shopping {items:[...]}
 - check_shopping {items:[...]}

@@ -8,6 +8,7 @@
  * - cada tipo tem sua janela: "amanhã você tem…" só a partir das 18h; contas e vencimentos a partir das 8h.
  */
 import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { unpaidInvoicesDue } from "./cards";
 import type { DB } from "@/db";
 import { notifications, pushSubscriptions, reminders, userPreferences, users, type User } from "@/db/schema";
 import { computeAlerts, type Alert } from "./data/alerts";
@@ -87,7 +88,7 @@ export async function notifyUser(db: DB, user: User, nowDate = new Date()): Prom
     expiringItems(db, user.id, addDays(today, 30)),
   ]);
   const uniqueEvents = [...new Map(occ.map((o) => [o.event.id, o.event])).values()];
-  const alerts = computeAlerts({ today, tz, events: uniqueEvents, bills, tasks: tks, shopping: shop, reminders: rems.filter((r) => !r.time), docs: exp.docs, warranties: exp.wars });
+  const alerts = computeAlerts({ today, tz, events: uniqueEvents, bills, tasks: tks, shopping: shop, reminders: rems.filter((r) => !r.time), docs: exp.docs, warranties: exp.wars, invoices: await unpaidInvoicesDue(db, user.id, today, addDays(today, 3)) });
   const timedReminders = rems.filter((r) => r.date === today && r.time && !r.sentAt).map((r) => ({ id: r.id, text: r.text, time: r.time! }));
   const eventsToday = occ.filter((o) => o.day === today).map((o) => ({ id: o.event.id, title: o.event.title, time: o.event.time }));
 

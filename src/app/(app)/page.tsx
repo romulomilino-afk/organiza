@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unpaidInvoicesDue } from "@/lib/cards";
 import { getDb } from "@/db";
 import { requirePageAccess } from "@/lib/session";
 import { addDays, DIAS, fmtLong, todayIn, weekday } from "@/lib/dates";
@@ -44,7 +45,7 @@ export default async function HomePage() {
   const noDate = tks.filter((t) => !t.dueDate);
 
   const uniqueEvents = [...new Map(occ.map((o) => [o.event.id, o.event])).values()];
-  const allAlerts = computeAlerts({ today, tz: user.timezone, events: uniqueEvents, bills, tasks: tks, shopping: shop, reminders: rems, docs: exp.docs, warranties: exp.wars });
+  const allAlerts = computeAlerts({ today, tz: user.timezone, events: uniqueEvents, bills, tasks: tks, shopping: shop, reminders: rems, docs: exp.docs, warranties: exp.wars, invoices: await unpaidInvoicesDue(db, user.id, today, addDays(today, 3)) });
   const dismissed = await dismissedKeys(db, user.id, allAlerts.map((a) => a.key));
   const alerts = allAlerts.filter((a) => !dismissed.has(a.key)).slice(0, 4);
   const plan = access.plan;

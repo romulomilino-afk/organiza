@@ -7,6 +7,7 @@ import {
 import { visible, type Access } from "../access";
 import { addDays, dateInMonth, addMonths, monthStart, monthEnd, todayIn } from "../dates";
 import { occursOn } from "../recurrence";
+import { monthCardSpend } from "../cards";
 
 export type Occurrence = { event: Event; day: string };
 
@@ -146,7 +147,11 @@ export async function monthFinance(db: DB, userId: string, today: string) {
     if (e.date === today) todayCents += v;
   }
   const incomeCents = inc.reduce((a, x) => a + x.amountCents, 0);
-  return { from, to, expenses: exp, incomes: inc, byCategory, expenseCents, incomeCents, balanceCents: incomeCents - expenseCents, todayCents };
+  // parcelas de cartão que vencem neste mês entram nos gastos e nas categorias
+  const card = await monthCardSpend(db, userId, from, to);
+  expenseCents += card.total;
+  for (const [k, v] of Object.entries(card.byCategory)) byCategory[k] = (byCategory[k] ?? 0) + v;
+  return { from, to, expenses: exp, incomes: inc, byCategory, expenseCents, incomeCents, balanceCents: incomeCents - expenseCents, todayCents, cardCents: card.total, cardByCard: card.byCard };
 }
 
 export async function recentMessages(db: DB, userId: string, conversationId: string, limit = 40) {

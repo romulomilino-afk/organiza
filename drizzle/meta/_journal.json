@@ -29,6 +29,13 @@
       "when": 1790953372555,
       "tag": "0003_categorias",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790956301274,
+      "tag": "0004_cartoes",
+      "breakpoints": true
     }
   ]
 }

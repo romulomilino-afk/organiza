@@ -2,11 +2,14 @@
  * Executor: aplica as ações validadas no banco, SEMPRE no escopo do usuário da sessão.
  * Ids citados pela IA são conferidos (dono = usuário, ou item compartilhado da família dele); senão, a ação é ignorada.
  */
-import { and, eq, gt, ilike, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, gte, ilike, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
-  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories,
+  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments,
 } from "@/db/schema";
+import { addPurchase, bestDay, cancelPurchase, payInvoice, pickCard, recomputeCard, userCards } from "../cards";
+
+const normName = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 import type { Action } from "./actions";
 import { addMonths, cap, dateInMonth, fmtBR, fmtLong, relDay } from "../dates";
 import { brl, METHOD_LABEL, toCents } from "../money";
@@ -128,6 +131,10 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
         await db.insert(income).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: catKey, date });
         return { icon: "💵", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name} · Receita`] };
       }
+      if (a.method === "cartao") {
+        const cards = await userCards(db, userId);
+        if (cards.length) return runOne(db, access, today, { type: "add_card_purchase", card: null, description: a.description, amount: a.amount, installmentAmount: undefined, installments: 1, date: a.date, category: a.category }, created);
+      }
       const method = a.method ? (a.method.toUpperCase() as "CARTAO" | "PIX" | "DINHEIRO" | "DEBITO" | "BOLETO") : null;
       const sharedFin = !!(a.shared && hh && access.household?.shareFinance);
       await db.insert(expenses).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: catKey, method, date, status: "PAID", paidAt: new Date(), householdId: sharedFin ? hh : null });
@@ -210,6 +217,62 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       await db.update(recurringItems).set({ categoryKey: c.kind === "INCOME" ? "renda_extra" : "outros" }).where(and(eq(recurringItems.userId, userId), eq(recurringItems.categoryKey, c.key)));
       await db.delete(categories).where(and(eq(categories.userId, userId), eq(categories.key, c.key)));
       return { icon: "🗑️", title: `Categoria ${c.name} apagada`, lines: [`Os lançamentos dela foram para ${c.kind === "INCOME" ? "Renda extra" : "Outros"}`] };
+    }
+    case "add_card": {
+      const cards = await userCards(db, userId);
+      if (cards.length >= 10) return null;
+      const existing = pickCard(cards, a.name);
+      if (existing && normName(existing.name) === normName(a.name)) {
+        return runOne(db, access, today, { type: "update_card", card: existing.name, name: null, closingDay: a.closingDay, dueDay: a.dueDay, limit: a.limit }, created);
+      }
+      const [card] = await db.insert(creditCards).values({ userId, name: cap(a.name), closingDay: a.closingDay, dueDay: a.dueDay, limitCents: a.limit ? toCents(a.limit) : null }).returning();
+      const b = bestDay(card, today);
+      return { icon: "💳", title: `Cartão ${card.name}`, lines: [`Fecha dia ${card.closingDay} · vence dia ${card.dueDay}${card.limitCents ? ` · limite ${brl(card.limitCents)}` : ""}`, `Melhor dia de compra: dia ${b.day}`] };
+    }
+    case "update_card": {
+      const card = pickCard(await userCards(db, userId), a.card);
+      if (!card) return null;
+      const patch: Partial<typeof creditCards.$inferInsert> = {};
+      if (a.name) patch.name = cap(a.name);
+      if (a.closingDay) patch.closingDay = a.closingDay;
+      if (a.dueDay) patch.dueDay = a.dueDay;
+      if (a.limit) patch.limitCents = toCents(a.limit);
+      if (!Object.keys(patch).length) return null;
+      const [upd] = await db.update(creditCards).set(patch).where(eq(creditCards.id, card.id)).returning();
+      if (a.closingDay || a.dueDay) await recomputeCard(db, userId, upd);
+      return { icon: "💳", title: `Cartão ${upd.name}`, lines: [`Fecha dia ${upd.closingDay} · vence dia ${upd.dueDay}${upd.limitCents ? ` · limite ${brl(upd.limitCents)}` : ""}`, `Melhor dia de compra: dia ${upd.closingDay}`] };
+    }
+    case "delete_card": {
+      const card = pickCard(await userCards(db, userId), a.card);
+      if (!card) return null;
+      await db.update(creditCards).set({ active: false }).where(eq(creditCards.id, card.id));
+      await db.delete(cardInstallments).where(and(eq(cardInstallments.cardId, card.id), gte(cardInstallments.dueDate, today)));
+      return { icon: "🗑️", title: `Cartão ${card.name} removido`, lines: ["As compras dele saíram das faturas"] };
+    }
+    case "add_card_purchase": {
+      const card = pickCard(await userCards(db, userId), a.card);
+      if (!card) return null;
+      const n = a.installments;
+      const totalCents = a.amount ? toCents(a.amount) : toCents(a.installmentAmount!) * n;
+      const catKey = (await cats()).resolve(a.category, a.description, "EXPENSE");
+      const r = await addPurchase(db, userId, card, { description: cap(a.description), totalCents, installments: n, purchaseDate: a.date ?? today, categoryKey: catKey });
+      const cat = (await cats()).get(catKey);
+      return { icon: "💳", title: `${cap(a.description)} · ${brl(totalCents)}`, lines: [
+        `${card.name} · ${n > 1 ? `${n}x de ${brl(r.parts[n - 1])}` : "à vista"} · ${cat.emoji} ${cat.name}`,
+        n > 1 ? `1ª na fatura de ${fmtBR(r.firstDue)} · última em ${fmtBR(r.lastDue)}` : `Entra na fatura de ${fmtBR(r.firstDue)}`,
+      ] };
+    }
+    case "pay_invoice": {
+      const card = pickCard(await userCards(db, userId), a.card);
+      if (!card) return null;
+      const inv = await payInvoice(db, userId, card, today);
+      if (!inv) return null;
+      return { icon: "✅", title: `Fatura ${card.name} paga`, lines: [`${brl(inv.totalCents)} · vencimento ${fmtBR(inv.dueDate)}`] };
+    }
+    case "cancel_card_purchase": {
+      const p = await cancelPurchase(db, userId, a.id);
+      if (!p) return null;
+      return { icon: "🗑️", title: `${p.description} cancelada`, lines: ["As parcelas ainda não pagas saíram das faturas"] };
     }
     case "add_shopping": {
       // na família, a lista de compras é compartilhada por padrão

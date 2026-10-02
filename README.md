@@ -50,7 +50,7 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
 |---|---|
 | `npm run dev` / `npm run build && npm start` | Desenvolvimento / produção |
 | `npm run worker` | Roda o "tick" (avisos e assinaturas) a cada 5 minutos, localmente |
-| `npm test` | 30 testes de ponta a ponta, contra um Postgres real em memória (PGlite), sem Docker |
+| `npm test` | 35 testes de ponta a ponta, contra um Postgres real em memória (PGlite), sem Docker |
 | `npm run typecheck` | Checagem de tipos |
 | `npm run secrets` | Gera AUTH_SECRET, CRON_SECRET, a chave de arquivos, as chaves VAPID e os tokens de webhook |
 | `npm run db:generate` / `npm run db:migrate` | Gera / aplica migrações |
@@ -97,6 +97,12 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
   - As palavras-chave valem para os próximos lançamentos e já movem os antigos.
   - As categorias padrão continuam disponíveis e também aceitam palavras-chave ("academia vai na categoria Saúde").
   - A tela Dinheiro tem o quadro "Minhas categorias", para criar e apagar.
+- **Cartões de crédito.**
+  - "Meu Nubank fecha dia 3 e vence dia 10" cadastra o cartão e calcula o melhor dia de compra.
+  - "Comprei uma TV de 3.000 em 10x no Nubank" gera as 10 parcelas, cada uma na fatura certa.
+  - A aba Cartões mostra a fatura a pagar, a fatura aberta, as próximas faturas, as parcelas em andamento e o limite usado.
+  - A fatura entra em "Contas a pagar", com aviso e o botão "Paguei".
+  - As parcelas do mês contam nos gastos e nas categorias.
 - **Plano Família.**
   - Até 5 pessoas, com convite por link de uso único.
   - Lista de compras da família, e agenda e tarefas compartilhadas quando você disser "a gente…" ou "da família".
@@ -135,7 +141,7 @@ src/
   db/schema.ts     todas as tabelas
 public/sw.js       service worker (push + offline)
 drizzle/           migrações SQL
-tests/             nina.test.ts (MVP) · fase2.test.ts · fixos.test.ts · categorias.test.ts
+tests/             nina.test.ts (MVP) · fase2.test.ts · fixos.test.ts · categorias.test.ts · cartoes.test.ts
 docs/              ARQUITETURA.md · INTEGRACOES.md
 ```
 

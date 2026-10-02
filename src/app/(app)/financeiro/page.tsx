@@ -5,6 +5,10 @@ import { MESES, relDay, todayIn, fmtShort } from "@/lib/dates";
 import { brl, METHOD_LABEL } from "@/lib/money";
 import { loadCategories } from "@/lib/data/user-categories";
 import { addCategoryForm, deleteCategory } from "@/actions/categories";
+import { payInvoiceAction } from "@/actions/cards";
+import { unpaidInvoicesDue } from "@/lib/cards";
+import { FinanceTabs } from "@/components/FinanceTabs";
+import { addDays } from "@/lib/dates";
 import { hasFeature, type PlanId } from "@/lib/plans";
 import { activeSubscriptions, ensureRecurringBills, fixedItems, householdFinance, monthFinance, pendingBills } from "@/lib/data/queries";
 import { addFixed, cancelFixed } from "@/actions/fixed";
@@ -29,6 +33,7 @@ export default async function FinanceiroPage() {
   const today = todayIn(user.timezone);
   await ensureRecurringBills(db, user.id, today, user.timezone);
   const [fin, bills, subs, fam, fixos, ucats] = await Promise.all([monthFinance(db, user.id, today), pendingBills(db, access), activeSubscriptions(db, user.id), householdFinance(db, access, today), fixedItems(db, user.id), loadCategories(db, user.id)]);
+  const faturas = await unpaidInvoicesDue(db, user.id, today, addDays(today, 30));
   const category = (k: string | null | undefined) => ucats.get(k);
   const myCats = ucats.list.filter((c) => c.custom || c.keywords.length);
 
@@ -43,6 +48,7 @@ export default async function FinanceiroPage() {
   return (
     <>
       <PageHeader title="Dinheiro" subtitle={`Este mês · ${MESES[Number(today.slice(5, 7)) - 1]}`} />
+      <FinanceTabs active="resumo" />
       <div className="flex flex-col gap-3">
         <div className="card">
           <div className="grid grid-cols-2 gap-3">
@@ -53,6 +59,11 @@ export default async function FinanceiroPage() {
             <div className="text-[13px] font-semibold text-ink-3">Saldo</div>
             <div className={`num font-display text-[26px] font-semibold ${fin.balanceCents < 0 ? "text-bad" : ""}`}>{brl(fin.balanceCents)}</div>
           </div>
+          {fin.cardCents > 0 && (
+            <Link href="/financeiro/cartoes" className="mt-3 flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-sm">
+              <span>💳 Parcelas de cartão que vencem este mês</span><b className="num">{brl(fin.cardCents)}</b>
+            </Link>
+          )}
         </div>
 
         <div className="card">
@@ -99,6 +110,16 @@ export default async function FinanceiroPage() {
 
         <div className="card">
           <div className="eyebrow mb-1">Contas a pagar</div>
+          {faturas.map((f) => (
+            <div key={f.cardId + f.dueDate} className="row">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">💳 Fatura {f.cardName}</div>
+                <div className="text-[13px] text-ink-3">{brl(f.totalCents)}</div>
+              </div>
+              <span className={`pill ${f.dueDate < today ? "pill-bad" : f.dueDate <= today ? "pill-warn" : "pill-ok"}`}>{f.dueDate < today ? "Vencida" : f.dueDate === today ? "Hoje" : fmtShort(f.dueDate)}</span>
+              <SmallButton action={payInvoiceAction.bind(null, f.cardId, f.dueDate)}>Paguei</SmallButton>
+            </div>
+          ))}
           {bills.length ? bills.map((b) => {
             const late = b.dueDate! < today;
             return (
@@ -111,7 +132,7 @@ export default async function FinanceiroPage() {
                 <SmallButton action={payBill.bind(null, b.id)}>Paguei</SmallButton>
               </div>
             );
-          }) : <Empty>Nenhuma conta pendente. Diga “minha conta de luz vence todo dia 10”.</Empty>}
+          }) : faturas.length ? null : <Empty>Nenhuma conta pendente. Diga “minha conta de luz vence todo dia 10”.</Empty>}
         </div>
 
         <div className="card">

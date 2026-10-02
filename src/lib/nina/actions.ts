@@ -51,6 +51,17 @@ export const ActionSchema = z.discriminatedUnion("type", [
     kind: z.enum(["expense", "income"]).nullish().transform((v) => v ?? "expense"),
     keywords: z.array(txt(40)).max(20).nullish().transform((v) => v ?? []) }),
   z.object({ type: z.literal("delete_category"), name: txt(40) }),
+  // Cartões de crédito
+  z.object({ type: z.literal("add_card"), name: txt(40), closingDay: z.coerce.number().int().min(1).max(31),
+    dueDay: z.coerce.number().int().min(1).max(31), limit: optReais }),
+  z.object({ type: z.literal("update_card"), card: txt(40), name: txt(40).nullish(), closingDay: z.coerce.number().int().min(1).max(31).nullish(),
+    dueDay: z.coerce.number().int().min(1).max(31).nullish(), limit: optReais }),
+  z.object({ type: z.literal("delete_card"), card: txt(40) }),
+  z.object({ type: z.literal("add_card_purchase"), card: txt(40).nullish(), description: txt(120), amount: optReais, installmentAmount: optReais,
+    installments: z.coerce.number().int().min(1).max(48).nullish().transform((v) => v ?? 1), date: optDay, category: z.string().default("outros") })
+    .refine((a) => a.amount || a.installmentAmount, "compra precisa de amount ou installmentAmount"),
+  z.object({ type: z.literal("pay_invoice"), card: txt(40).nullish() }),
+  z.object({ type: z.literal("cancel_card_purchase"), id: idRef }),
   // Compras
   z.object({ type: z.literal("add_shopping"), items }),
   z.object({ type: z.literal("remove_shopping"), items }),

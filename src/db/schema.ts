@@ -394,7 +394,60 @@ export const whatsappInbound = pgTable("whatsapp_inbound", {
   receivedAt: createdAt(),
 });
 
+// ─────────────── Cartões de crédito ───────────────
+export const creditCards = pgTable("credit_cards", {
+  id: id(),
+  userId: userId(),
+  name: text("name").notNull(),
+  closingDay: integer("closing_day").notNull(),   // dia em que a fatura fecha
+  dueDay: integer("due_day").notNull(),           // dia de vencimento
+  limitCents: integer("limit_cents"),
+  active: boolean("active").notNull().default(true),
+  createdAt: createdAt(),
+}, (t) => [index("credit_cards_user_idx").on(t.userId, t.active)]);
+
+export const cardPurchases = pgTable("card_purchases", {
+  id: id(),
+  userId: userId(),
+  cardId: text("card_id").notNull().references(() => creditCards.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  totalCents: integer("total_cents").notNull(),
+  installments: integer("installments").notNull().default(1),
+  purchaseDate: date("purchase_date", { mode: "string" }).notNull(),
+  categoryKey: text("category_key").notNull().default("outros"),
+  cancelled: boolean("cancelled").notNull().default(false),
+  createdAt: createdAt(),
+}, (t) => [index("card_purchases_user_idx").on(t.userId, t.cardId)]);
+
+/** Uma linha por parcela, já na fatura (vencimento) em que ela cai. */
+export const cardInstallments = pgTable("card_installments", {
+  id: id(),
+  userId: userId(),
+  cardId: text("card_id").notNull().references(() => creditCards.id, { onDelete: "cascade" }),
+  purchaseId: text("purchase_id").notNull().references(() => cardPurchases.id, { onDelete: "cascade" }),
+  number: integer("number").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  dueDate: date("due_date", { mode: "string" }).notNull(),
+}, (t) => [
+  index("card_inst_user_due_idx").on(t.userId, t.dueDate),
+  index("card_inst_card_due_idx").on(t.cardId, t.dueDate),
+  uniqueIndex("card_inst_purchase_number_uq").on(t.purchaseId, t.number),
+]);
+
+/** Faturas pagas (a fatura em si é a soma das parcelas daquele vencimento). */
+export const cardInvoicePayments = pgTable("card_invoice_payments", {
+  id: id(),
+  userId: userId(),
+  cardId: text("card_id").notNull().references(() => creditCards.id, { onDelete: "cascade" }),
+  dueDate: date("due_date", { mode: "string" }).notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("card_invoice_paid_uq").on(t.cardId, t.dueDate)]);
+
 export type User = typeof users.$inferSelect;
+export type CreditCard = typeof creditCards.$inferSelect;
+export type CardPurchase = typeof cardPurchases.$inferSelect;
+export type CardInstallment = typeof cardInstallments.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Event = typeof events.$inferSelect;
 export type Reminder = typeof reminders.$inferSelect;

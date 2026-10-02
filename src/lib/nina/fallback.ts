@@ -3,7 +3,8 @@
  * Cobre os casos mais comuns do dia a dia. A IA (llm.ts) cobre o resto.
  * Função pura: facilita testes.
  */
-import { addDays, dateInMonth, addMonths, weekday, cap, relDay } from "../dates";
+import { addDays, dateInMonth, addMonths, weekday, cap, relDay, fmtBR } from "../dates";
+import { firstDueDate } from "../cards";
 import { brl, toCents } from "../money";
 
 type Out = { reply: string; actions: Record<string, unknown>[]; suggestion?: Record<string, unknown> | null };
@@ -90,6 +91,8 @@ function stripDateWords(s: string) {
 type UserCat = { key: string; name: string; kind: "EXPENSE" | "INCOME"; keywords: string[] };
 /** Categorias da pessoa durante a interpretação (a função é síncrona, então não há mistura entre usuários). */
 let userCats: UserCat[] = [];
+type UserCard = { name: string; closingDay: number; dueDay: number; limitCents?: number | null; usedCents?: number };
+let userCardsList: UserCard[] = [];
 function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
   let best: { c: UserCat; n: number } | null = null;
   for (const c of userCats) if (c.kind === kind) for (const k of c.keywords) {
@@ -100,10 +103,11 @@ function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
 }
 const catName = (key: string) => userCats.find((c) => c.key === key)?.name ?? CAT_NAME[key] ?? "Outros";
 
-export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {}, opts: { family?: boolean; categories?: UserCat[] } = {}): Out {
+export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {}, opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[] } = {}): Out {
   userCats = opts.categories ?? [];
+  userCardsList = opts.cards ?? [];
   let out: Out;
-  try { out = fallbackCore(text, today, history); } finally { userCats = []; }
+  try { out = fallbackCore(text, today, history); } finally { userCats = []; userCardsList = []; }
   // na família: "a gente", "família", "casa", "nós"… compartilha compromissos e tarefas
   if (opts.family && /\b(familia|família|a gente|nós|nos vamos|compartilh|todo mundo|lá em casa)\b/i.test(text)) {
     for (const a of out.actions) if (a.type === "add_event" || a.type === "add_task") a.shared = true;
@@ -115,6 +119,15 @@ function fallbackCore(text: string, today: string, history: { lastUser?: string;
   const raw = text.trim();
   const s = norm(raw);
 
+  if (history.lastAssistant && history.lastUser && /(qual dia a fatura .*fecha|qual dia vence a fatura)/.test(norm(history.lastAssistant))) {
+    const n = s.match(/\b(\d{1,2})\b/);
+    const word = /fecha/.test(norm(history.lastAssistant)) ? "fecha" : "vence";
+    if (n) return fallbackCore(`${history.lastUser} ${word} dia ${n[1]}`, today);
+  }
+  if (history.lastAssistant && history.lastUser && /em qual cartao/.test(norm(history.lastAssistant))) {
+    const c = findCard(s);
+    if (c) return fallbackCore(`${history.lastUser} no ${c.name}`, today);
+  }
   // resposta a uma pergunta de horário/dia feita antes
   if (history.lastAssistant && history.lastUser && /qual (horario|dia)/.test(norm(history.lastAssistant))) {
     const t = parseTime(raw) ?? (/^\d{1,2}$/.test(s) ? `${pad(Number(s))}:00` : null);
@@ -157,6 +170,94 @@ function fallbackCore(text: string, today: string, history: { lastUser?: string;
   const n = out.actions.filter((a) => a.type !== "remember").length;
   out.reply = [n ? `Pronto! Organizei ${n} ${n === 1 ? "item" : "itens"} para você. 👍` : "", ...replies].filter(Boolean).join(" ");
   return out;
+}
+
+const BANKS = /\b(nubank|nu|inter|itau|bradesco|santander|caixa|c6|bb|banco do brasil|next|picpay|mercado pago|neon|original|pan|xp|porto( seguro)?|carrefour|riachuelo|renner|sicredi|sicoob|will|ourocard|elo|visa|mastercard|amex|digio|btg|credicard|hipercard|magalu|americanas)\b/;
+function findCard(s: string): UserCard | null {
+  return userCardsList.find((c) => new RegExp(`\\b${norm(c.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(s)) ?? null;
+}
+/** Valor da compra ignorando "10x", "dia 5" e "fecha/vence dia N". */
+function purchaseMoney(raw: string): { total?: number; each?: number } {
+  const t = raw.toLowerCase().replace(/(\d)\.(\d{3})/g, "$1$2");
+  const each = t.match(/(\d{1,2})\s*(?:x|vezes|parcelas)\s*de\s*(?:r\$\s*)?(\d+(?:,\d{1,2})?)/);
+  if (each) return { each: Number(each[2].replace(",", ".")) };
+  const clean = t.replace(/(\d{1,2})\s*(?:x|vezes|parcelas)\b/g, " ").replace(/\bdia\s+\d{1,2}\b/g, " ").replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, " ");
+  const m = clean.match(/r\$\s*(\d+(?:,\d{1,2})?)/) ?? clean.match(/\b(\d+(?:,\d{1,2})?)\b/);
+  return m ? { total: Number(m[1].replace(",", ".")) } : {};
+}
+
+function parseCard(raw: string, s: string, today: string): Out | null {
+  // pergunta: melhor dia de compra
+  if (/melhor dia (de|pra|para) (compra|comprar)/.test(s)) {
+    if (!userCardsList.length) return { reply: "Me fala seu cartão primeiro, ex.: “meu Nubank fecha dia 3 e vence dia 10”. Aí te digo o melhor dia. 💳", actions: [] };
+    return { reply: userCardsList.map((c) => `${c.name}: melhor dia de compra é dia ${c.closingDay} (fecha dia ${c.closingDay}, vence dia ${c.dueDay}).`).join(" ") + " Comprando nesse dia, a compra vai para a fatura seguinte. 💳", actions: [] };
+  }
+  // limite: "o limite do Nubank agora é 8.000", "qual meu limite?"
+  if (/\blimite\b/.test(s) && userCardsList.length && !/\bfecha(mento)?\b/.test(s)) {
+    const c = findCard(s) ?? (userCardsList.length === 1 ? userCardsList[0] : null);
+    const v = s.replace(/(\d)\.(\d{3})/g, "$1$2").match(/(?:r\$\s*)?(\d+(?:,\d{1,2})?)/)?.[1];
+    if (v) {
+      if (!c) return { reply: `De qual cartão? ${userCardsList.map((x) => x.name).join(" ou ")}?`, actions: [] };
+      const limit = Number(v.replace(",", "."));
+      return { reply: `Pronto, o limite do ${c.name} agora é ${brl(toCents(limit))}. 💳`, actions: [{ type: "update_card", card: c.name, limit }] };
+    }
+    const list = c ? [c] : userCardsList;
+    return { reply: list.map((x) => x.limitCents
+      ? `${x.name}: limite ${brl(x.limitCents)}, usado ${brl(x.usedCents ?? 0)}, disponível ${brl(Math.max(0, x.limitCents - (x.usedCents ?? 0)))}.`
+      : `${x.name}: ainda não sei o limite. Diga “o limite do ${x.name} é 5.000”.`).join(" ") + " 💳", actions: [] };
+  }
+  // pagar a fatura
+  if (/(paguei|pagar|quitei|ja paguei) (a |minha )?fatura|paguei o cartao/.test(s)) {
+    if (!userCardsList.length) return null;
+    const c = findCard(s) ?? (userCardsList.length === 1 ? userCardsList[0] : null);
+    if (!c) return { reply: `De qual cartão? ${userCardsList.map((x) => x.name).join(" ou ")}?`, actions: [] };
+    return { reply: `Pronto, marquei a fatura do ${c.name} como paga. ✅`, actions: [{ type: "pay_invoice", card: c.name }] };
+  }
+  // cadastrar cartão: "meu Nubank fecha dia 3 e vence dia 10", "cartão Inter vence dia 15 fecha dia 8 limite 5000"
+  const isRegister = (/\bfecha(mento)?\b/.test(s) || (/\bvence(mento)?\b/.test(s) && /\bcartao\b/.test(s))) && !/\b(comprei|gastei|paguei|parcel)/.test(s);
+  if (isRegister && (/\bcartao\b/.test(s) || BANKS.test(s))) {
+    const bank = s.match(BANKS)?.[0];
+    const named = raw.match(/cart[ãa]o\s+(?:do\s+|da\s+)?([A-Za-zÀ-ú0-9]+(?:\s+[A-Z][A-Za-zÀ-ú0-9]+)?)/)?.[1];
+    const nameRaw = named && !/^(fecha|vence|de|que|meu|com)$/i.test(named) ? named : bank ?? "Cartão";
+    const name = nameRaw === "nu" ? "Nubank" : cap(nameRaw);
+    const closing = s.match(/fecha(?:mento)?\s*(?:e\s*)?(?:no\s+|todo\s+)?(?:dia\s+)?(\d{1,2})\b/)?.[1];
+    const due = s.match(/vence(?:mento)?\s*(?:e\s*)?(?:no\s+|todo\s+)?(?:dia\s+)?(\d{1,2})\b/)?.[1];
+    const lim = s.replace(/(\d)\.(\d{3})/g, "$1$2").match(/limite\s*(?:de\s*)?(?:r\$\s*)?(\d+(?:,\d{1,2})?)/)?.[1];
+    if (!closing) return { reply: `Qual dia a fatura do ${name} fecha?`, actions: [] };
+    if (!due) return { reply: `Qual dia vence a fatura do ${name}?`, actions: [] };
+    const cd = Number(closing), dd = Number(due);
+    if (cd < 1 || cd > 31 || dd < 1 || dd > 31) return null;
+    return { reply: `Cartão ${name} cadastrado! Fecha dia ${cd}, vence dia ${dd}. Melhor dia de compra: dia ${cd}. 💳`,
+      actions: [{ type: "add_card", name, closingDay: cd, dueDay: dd, limit: lim ? Number(lim.replace(",", ".")) : undefined }] };
+  }
+  // compra no cartão
+  const inst = s.match(/\b(\d{1,2})\s*(?:x|vezes|parcelas)\b/);
+  const mentionsCard = /\b(no|pelo) (cartao|credito)\b|\bparcel/.test(s) || !!findCard(s);
+  const isBuy = /\b(comprei|gastei|paguei|parcelei|passei)\b/.test(s);
+  if (isBuy && (inst || mentionsCard)) {
+    if (!userCardsList.length) {
+      if (!inst) return null; // "gastei 50 no cartão" sem cartão cadastrado: vira despesa comum
+      return { reply: "Para eu controlar as parcelas, me diga seu cartão primeiro. Ex.: “meu Nubank fecha dia 3 e vence dia 10”. 💳", actions: [] };
+    }
+    const card = findCard(s) ?? (userCardsList.length === 1 ? userCardsList[0] : null);
+    if (!card) return { reply: `Em qual cartão? ${userCardsList.map((x) => x.name).join(" ou ")}?`, actions: [] };
+    const n = inst ? Math.min(48, Math.max(1, Number(inst[1]))) : 1;
+    const money = purchaseMoney(raw);
+    if (!money.total && !money.each) return { reply: "Qual foi o valor da compra?", actions: [] };
+    const desc = raw.replace(/\b(comprei|gastei|paguei|parcelei|passei)\b/i, "").replace(/\b(no|pelo|na)\s+(cart[ãa]o|cr[ée]dito)(\s+de cr[ée]dito)?\b/gi, "")
+      .replace(new RegExp(`\\b(no|na|do|da)?\\s*${card.name}\\b`, "i"), "")
+      .replace(/\b(em\s+)?\d{1,2}\s*(x|vezes|parcelas)(\s*de\s*(r\$\s*)?[\d.,]+)?/gi, "").replace(/(r\$\s*)?\d+(?:[.,]\d+)*\s*(reais|real)?/gi, "")
+      .replace(/\b(hoje|ontem)\b/gi, "").replace(/\s+(de|por|em|com)\s*$/i, "").replace(/^\s*(um|uma|o|a|de|no|na|em)\s+/i, "").replace(/\s+(de|por|em|com)(?=\s|$)/gi, " ").replace(/[.,!]+/g, "").replace(/\s{2,}/g, " ").trim();
+    const category = matchUserCat(s, "EXPENSE")?.key ?? guessCategory(s);
+    const description = cap(desc || catName(category));
+    const total = money.total ?? money.each! * n;
+    const each = money.each ?? total / n;
+    const date = /\bontem\b/.test(s) ? addDays(today, -1) : today;
+    const first = firstDueDate(date, card.closingDay, card.dueDay);
+    return { reply: `Lancei ${description} no ${card.name}: ${n > 1 ? `${n}x de ${brl(toCents(each))}` : brl(toCents(total))}. ${n > 1 ? "A 1ª parcela" : "Entra"} na fatura de ${fmtBR(first)}. 💳`,
+      actions: [{ type: "add_card_purchase", card: card.name, description, amount: money.total, installmentAmount: money.each, installments: n, category, date }] };
+  }
+  return null;
 }
 
 const EMOJI: [RegExp, string][] = [
@@ -245,6 +346,10 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
   const val = parseMoney(raw), date = parseDate(raw, today), time = parseTime(raw);
   const actions: Out["actions"] = [];
   const replies: string[] = [];
+
+  // cartão de crédito: cadastro, compras parceladas, fatura, melhor dia
+  const cardCmd = parseCard(raw, s, today);
+  if (cardCmd) return cardCmd;
 
   // categorias: "cria a categoria Beleza", "barbearia vai na categoria Beleza", "apaga a categoria Beleza"
   const catCmd = parseCategory(raw, s);
