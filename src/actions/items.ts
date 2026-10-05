@@ -139,13 +139,14 @@ export async function dismissAlert(key: string, kind: string, title: string) {
 const onboardingSchema = z.object({
   name: z.string().trim().min(1).max(80),
   focus: z.array(z.enum(["agenda", "tarefas", "dinheiro", "casa", "familia", "tudo"])).max(6),
+  currency: z.enum(["BRL", "USD", "EUR"]).default("BRL"),
 });
 
-export async function completeOnboarding(input: { name: string; focus: string[] }) {
+export async function completeOnboarding(input: { name: string; focus: string[]; currency?: string }) {
   const u = await requireUser(); const db = getDb();
-  const { name, focus } = onboardingSchema.parse(input);
+  const { name, focus, currency } = onboardingSchema.parse(input);
   await ensureUserSetup(db, u.id);
-  await db.update(users).set({ name, onboarded: true }).where(eq(users.id, u.id));
+  await db.update(users).set({ name, onboarded: true, currency }).where(eq(users.id, u.id));
   await db.update(userPreferences).set({ focus }).where(eq(userPreferences.userId, u.id));
   refresh();
 }
@@ -166,31 +167,8 @@ export async function logout() {
 export async function setCurrencyAction(form: FormData) {
   const u = await requireUser();
   const f = z.object({ currency: z.enum(["BRL", "USD", "EUR"]), convert: z.string().optional() }).safeParse(Object.fromEntries(form));
-  if (!f.success || f.data.currency === u.currency) return;
-  const db = getDb();
-  if (f.data.convert === "on") {
-    const { getRates, rate } = await import("@/lib/fx");
-    const { isCurrency } = await import("@/lib/money");
-    const r = await getRates(db, todayIn(u.timezone));
-    const from = isCurrency(u.currency) ? u.currency : "BRL";
-    if (!r) return; // sem cotação: não muda nada (evita misturar moedas)
-    const k = rate(from, f.data.currency, r);
-    const { sql } = await import("drizzle-orm");
-    const s = await import("@/db/schema");
-    const conv = (col: unknown) => sql`round(${col} * ${k})::int`;
-    await db.transaction(async (tx) => {
-      await tx.update(s.expenses).set({ amountCents: conv(s.expenses.amountCents) }).where(eq(s.expenses.userId, u.id));
-      await tx.update(s.income).set({ amountCents: conv(s.income.amountCents) }).where(eq(s.income.userId, u.id));
-      await tx.update(s.recurringItems).set({ amountCents: conv(s.recurringItems.amountCents) }).where(eq(s.recurringItems.userId, u.id));
-      await tx.update(s.subscriptions).set({ amountCents: conv(s.subscriptions.amountCents) }).where(eq(s.subscriptions.userId, u.id));
-      await tx.update(s.creditCards).set({ limitCents: conv(s.creditCards.limitCents) }).where(eq(s.creditCards.userId, u.id));
-      await tx.update(s.cardPurchases).set({ totalCents: conv(s.cardPurchases.totalCents) }).where(eq(s.cardPurchases.userId, u.id));
-      await tx.update(s.cardInstallments).set({ amountCents: conv(s.cardInstallments.amountCents) }).where(eq(s.cardInstallments.userId, u.id));
-      await tx.update(s.cardInvoicePayments).set({ amountCents: conv(s.cardInvoicePayments.amountCents) }).where(eq(s.cardInvoicePayments.userId, u.id));
-      await tx.update(users).set({ currency: f.data.currency }).where(eq(users.id, u.id));
-    });
-  } else {
-    await db.update(users).set({ currency: f.data.currency }).where(eq(users.id, u.id));
-  }
+  if (!f.success) return;
+  const { changeCurrency } = await import("@/lib/fx");
+  await changeCurrency(getDb(), u, f.data.currency, f.data.convert === "on");
   refresh();
 }

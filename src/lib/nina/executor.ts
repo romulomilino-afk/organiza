@@ -5,7 +5,7 @@
 import { and, eq, gt, gte, ilike, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
-  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments, deadlines, shoppingRoutines,
+  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments, deadlines, shoppingRoutines, users,
 } from "@/db/schema";
 import { completeDeadline, ensureRoutines, onBought, remindFrom, upsertRoutine } from "../watch";
 import { addPurchase, bestDay, cancelPurchase, payInvoice, pickCard, recomputeCard, userCards } from "../cards";
@@ -14,7 +14,7 @@ const normName = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u030
 import type { Action } from "./actions";
 import { addDays, addMonths, cap, dateInMonth, fmtBR, fmtLong, relDay } from "../dates";
 import { brl, CURRENCIES, isCurrency, METHOD_LABEL, toCents, withCurrency, type Currency } from "../money";
-import { convert, getRates, rate } from "../fx";
+import { changeCurrency, convert, getRates, rate } from "../fx";
 import { CATEGORIES } from "../categories";
 import { loadCategories, moveByKeywords, slugKey, upsertCategory } from "../data/user-categories";
 
@@ -256,6 +256,15 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
         .where(and(visible(shoppingRoutines, access), sql`lower(${shoppingRoutines.name}) = ${a.item.trim().toLowerCase()}`)).returning();
       if (!rows.length) return null;
       return { icon: "🗑️", title: `${rows[0].name}`, lines: ["Não volta mais sozinho para a lista"] };
+    }
+    case "set_currency": {
+      const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!u) return null;
+      const r = await changeCurrency(db, u, a.currency, a.convert);
+      if (!r.changed) return a.convert && u.currency !== a.currency ? { icon: "⚠️", title: "Não consegui a cotação agora", lines: ["Tente de novo em alguns minutos"] } : null;
+      access.currency = a.currency;
+      const c = CURRENCIES[a.currency];
+      return { icon: c.flag, title: `Agora trabalho em ${c.name} (${c.symbol})`, lines: [r.factor ? `Valores já registrados convertidos (1 ${CURRENCIES[(isCurrency(u.currency) ? u.currency : "BRL") as Currency].symbol} = ${r.factor.toFixed(4).replace(".", ",")} ${c.symbol})` : "Valores já registrados mantidos, só o símbolo mudou"] };
     }
     case "add_card": {
       const cards = await userCards(db, userId);

@@ -33,6 +33,7 @@ export const ACTION_FEATURE: Record<string, Feature> = {
   add_fixed: "financeiro", update_fixed: "financeiro", cancel_fixed: "financeiro",
   add_category: "financeiro", delete_category: "financeiro",
   add_deadline: "lembretes", complete_deadline: "lembretes", add_shopping_routine: "compras", cancel_shopping_routine: "compras",
+  set_currency: "lembretes",
   add_card: "financeiro", update_card: "financeiro", delete_card: "financeiro", add_card_purchase: "financeiro", pay_invoice: "financeiro", cancel_card_purchase: "financeiro",
   add_subscription: "assinaturas", cancel_subscription: "assinaturas",
   add_warranty: "garantias", add_document: "documentos",

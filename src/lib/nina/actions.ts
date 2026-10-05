@@ -61,6 +61,8 @@ export const ActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_shopping_routine"), item: txt(80), everyDays: z.coerce.number().int().min(1).max(365).nullish().transform((v) => v ?? 30),
     addNow: z.boolean().nullish().transform((v) => v ?? false) }),
   z.object({ type: z.literal("cancel_shopping_routine"), item: txt(80) }),
+  // Moeda em que a Nina trabalha
+  z.object({ type: z.literal("set_currency"), currency: z.enum(["BRL", "USD", "EUR"]), convert: z.boolean().nullish().transform((v) => v ?? false) }),
   // Cartões de crédito
   z.object({ type: z.literal("add_card"), name: txt(40), closingDay: z.coerce.number().int().min(1).max(31),
     dueDay: z.coerce.number().int().min(1).max(31), limit: optReais }),

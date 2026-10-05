@@ -109,6 +109,9 @@ const catName = (key: string) => userCats.find((c) => c.key === key)?.name ?? CA
 export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {},
   opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[]; budget?: Budget | null; financeEnabled?: boolean; currency?: Currency; rates?: Rates | null } = {}): Out {
   const sN = norm(text);
+  // trocar a moeda em que a Nina trabalha: "trabalha em dólar", "muda minha moeda para euro"
+  const swap = currencySwitch(text, sN, opts.currency ?? "BRL", history);
+  if (swap) return swap;
   // conversão: "quanto é 100 dólares em reais?", "cotação do euro"
   const conv = convertQuestion(text, sN, opts.currency ?? "BRL", opts.rates ?? null);
   if (conv) return conv;
@@ -282,6 +285,31 @@ function parseWatch(raw: string, s: string, today: string): Out | null {
     };
   }
   return null;
+}
+
+const SWITCH_Q = "Quer que eu converta o que você já registrou pela cotação de hoje, ou só troque o símbolo?";
+function currencySwitch(raw: string, s: string, mine: Currency, history: { lastUser?: string; lastAssistant?: string }): Out | null {
+  // resposta à pergunta "converter ou só trocar o símbolo?"
+  if (history.lastAssistant?.includes(SWITCH_Q) && history.lastUser) {
+    const to = currencyInText(history.lastUser);
+    if (to) {
+      const no = /\b(nao|so (troca|o simbolo|trocar)|sem converter|simbolo|deixa)\b/.test(s);
+      const yes = /\b(sim|converte|converter|convert|pode|isso|quero)\b/.test(s);
+      if (no || yes) {
+        const convert = yes && !no;
+        return { reply: `Pronto! Agora anoto seus gastos e receitas em ${CURRENCIES[to].name} (${CURRENCIES[to].symbol})${convert ? " e converti o que você já tinha registrado" : ""}. ${CURRENCIES[to].flag}`,
+          actions: [{ type: "set_currency", currency: to, convert }] };
+      }
+    }
+  }
+  if (!/\b(moeda|trabalh\w*|usar|use|anota\w*|registr\w*|muda\w*|troca\w*)\b.{0,40}\b(em|para|pra|no|na)?\s*(real|reais|dolar|dolares|euro|euros|brl|usd|eur)\b/.test(s)) return null;
+  if (/\b(gastei|paguei|recebi|ganhei|comprei|quanto|cotacao|converte\s+\d)/.test(s)) return null; // é lançamento ou pergunta de cotação
+  const to = currencyInText(raw);
+  if (!to) return null;
+  if (to === mine) return { reply: `Já estou trabalhando em ${CURRENCIES[to].name} (${CURRENCIES[to].symbol}). ${CURRENCIES[to].flag}`, actions: [] };
+  if (/sem converter|so (o )?simbolo|so trocar|nao converte/.test(s)) return { reply: `Pronto! Agora anoto tudo em ${CURRENCIES[to].name} (${CURRENCIES[to].symbol}). ${CURRENCIES[to].flag}`, actions: [{ type: "set_currency", currency: to, convert: false }] };
+  if (/convertendo|e converte|converter (os|tudo|o que)/.test(s)) return { reply: `Pronto! Agora anoto tudo em ${CURRENCIES[to].name} (${CURRENCIES[to].symbol}) e converti o que você já tinha. ${CURRENCIES[to].flag}`, actions: [{ type: "set_currency", currency: to, convert: true }] };
+  return { reply: `Combinado, vou trabalhar em ${CURRENCIES[to].name} (${CURRENCIES[to].symbol}). ${SWITCH_Q}`, actions: [] };
 }
 
 /** "quanto é 100 dólares em reais?", "converte 50 euros para dólar", "cotação do dólar" */

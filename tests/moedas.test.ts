@@ -122,3 +122,20 @@ test("Asaas: pagamento confirmado sem o evento de assinatura também liga; check
   const [v] = await db.select().from(schema.users).where(eq(schema.users.id, vip.id));
   assert.equal(v.plan, "FAMILY", "cancelar um checkout que nunca foi pago não tira o acesso");
 });
+
+test("trocar a moeda da Nina pela conversa: pergunta se converte e aplica a resposta", async () => {
+  const u = await mk("troca@x.com");
+  await handleMessage(db, u, "gastei 54 reais no almoço");
+  const q = await handleMessage(db, u, "Nina, trabalha em dólar");
+  assert.match(q.assistant.content, /converta o que você já registrou/);
+  await handleMessage(db, u, "sim, converte");
+  const [me] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
+  assert.equal(me.currency, "USD");
+  const [e] = await db.select().from(schema.expenses).where(eq(schema.expenses.userId, u.id));
+  assert.equal(e.amountCents, 1000, "R$ 54 viraram US$ 10");
+
+  await handleMessage(db, me, "muda minha moeda para euro sem converter");
+  const [me2] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
+  const [e2] = await db.select().from(schema.expenses).where(eq(schema.expenses.userId, u.id));
+  assert.deepEqual([me2.currency, e2.amountCents], ["EUR", 1000]);
+});

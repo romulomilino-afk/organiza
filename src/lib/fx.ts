@@ -57,3 +57,36 @@ export function convert(cents: number, from: Currency, to: Currency, r: Rates): 
 export function rate(from: Currency, to: Currency, r: Rates): number {
   return r.rates[to] / r.rates[from];
 }
+
+/**
+ * Troca a moeda em que a Nina trabalha. Com `convertExisting`, converte todos os valores já registrados pela cotação de hoje.
+ * Devolve o fator usado (ou null se só trocou o símbolo). Sem cotação disponível, não converte nem troca (evita misturar moedas).
+ */
+export async function changeCurrency(db: DB, user: { id: string; currency: string; timezone: string }, to: Currency, convertExisting: boolean): Promise<{ changed: boolean; factor: number | null }> {
+  const { isCurrency } = await import("./money");
+  const from: Currency = isCurrency(user.currency) ? user.currency : "BRL";
+  if (from === to) return { changed: false, factor: null };
+  const s = await import("@/db/schema");
+  const { sql } = await import("drizzle-orm");
+  if (!convertExisting) {
+    await db.update(s.users).set({ currency: to }).where(eq(s.users.id, user.id));
+    return { changed: true, factor: null };
+  }
+  const { todayIn } = await import("./dates");
+  const r = await getRates(db, todayIn(user.timezone));
+  if (!r) return { changed: false, factor: null };
+  const k = rate(from, to, r);
+  const conv = (col: unknown) => sql`round(${col} * ${k}::numeric)::int`;
+  await db.transaction(async (tx) => {
+    await tx.update(s.expenses).set({ amountCents: conv(s.expenses.amountCents) }).where(eq(s.expenses.userId, user.id));
+    await tx.update(s.income).set({ amountCents: conv(s.income.amountCents) }).where(eq(s.income.userId, user.id));
+    await tx.update(s.recurringItems).set({ amountCents: conv(s.recurringItems.amountCents) }).where(eq(s.recurringItems.userId, user.id));
+    await tx.update(s.subscriptions).set({ amountCents: conv(s.subscriptions.amountCents) }).where(eq(s.subscriptions.userId, user.id));
+    await tx.update(s.creditCards).set({ limitCents: conv(s.creditCards.limitCents) }).where(eq(s.creditCards.userId, user.id));
+    await tx.update(s.cardPurchases).set({ totalCents: conv(s.cardPurchases.totalCents) }).where(eq(s.cardPurchases.userId, user.id));
+    await tx.update(s.cardInstallments).set({ amountCents: conv(s.cardInstallments.amountCents) }).where(eq(s.cardInstallments.userId, user.id));
+    await tx.update(s.cardInvoicePayments).set({ amountCents: conv(s.cardInvoicePayments.amountCents) }).where(eq(s.cardInvoicePayments.userId, user.id));
+    await tx.update(s.users).set({ currency: to }).where(eq(s.users.id, user.id));
+  });
+  return { changed: true, factor: k };
+}
