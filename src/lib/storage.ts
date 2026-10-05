@@ -94,7 +94,16 @@ export async function putFile(userId: string, data: Buffer): Promise<string> {
   if (driver() === "s3") {
     await s3c().send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, Body: blob, ContentType: "application/octet-stream" }));
   } else if (driver() === "db") {
-    await (await sqlDb()).insert(await dbTable()).values({ key, userId, data: blob });
+    const db = await sqlDb(), t = await dbTable();
+    try {
+      await db.insert(t).values({ key, userId, data: blob });
+    } catch (e) {
+      // tabela ainda não criada (migração não rodou na publicação): cria agora e tenta de novo
+      if (!/document_files|42P01|does not exist/i.test(String((e as { code?: string }).code ?? "") + " " + String((e as Error).message ?? "") + " " + String((e as { cause?: Error }).cause?.message ?? ""))) throw e;
+      const { sql } = await import("drizzle-orm");
+      await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS "document_files" ("key" text PRIMARY KEY NOT NULL, "user_id" text NOT NULL REFERENCES "users"("id") ON DELETE CASCADE, "data" bytea NOT NULL, "created_at" timestamp with time zone DEFAULT now() NOT NULL)`));
+      await db.insert(t).values({ key, userId, data: blob });
+    }
   } else if (driver() === "netlify") {
     await (await blobs()).set(key, new Uint8Array(blob).buffer as ArrayBuffer);
   } else {

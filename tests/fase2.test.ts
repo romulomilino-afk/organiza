@@ -275,3 +275,21 @@ test("arquivos no banco (padrão no Netlify): guarda criptografado, lê de volta
     if (prev === undefined) delete process.env.STORAGE_DRIVER; else process.env.STORAGE_DRIVER = prev;
   }
 });
+
+test("arquivos no banco: se a tabela não existir (migração não rodou), cria sozinho e guarda", async () => {
+  const { setStorageDb } = await import("../src/lib/storage");
+  const { sql } = await import("drizzle-orm");
+  const u = await mk("autocura@x.com", "PREMIUM");
+  const prev = process.env.STORAGE_DRIVER;
+  process.env.STORAGE_DRIVER = "db";
+  setStorageDb(db);
+  try {
+    await db.execute(sql`DROP TABLE "document_files"`);
+    const pdf = Buffer.from("%PDF-1.4 teste");
+    const key = await putFile(u.id, pdf);
+    assert.deepEqual(await getFile(key), pdf);
+  } finally {
+    setStorageDb(null);
+    if (prev === undefined) delete process.env.STORAGE_DRIVER; else process.env.STORAGE_DRIVER = prev;
+  }
+});

@@ -44,8 +44,11 @@ export const POST = route("documents.upload", async (req: Request) => {
     try {
       fileKey = await putFile(user.id, buf);
     } catch (e) {
-      log.error("documents.storage_failed", { userId: user.id, error: e as Error });
-      throw new AppError(503, "Não consegui guardar o arquivo agora. Tente de novo em instantes.", "storage");
+      const err = e as Error & { cause?: Error; code?: string };
+      const detail = `${err.code ? err.code + " " : ""}${err.name}: ${err.cause?.message ?? err.message}`
+        .replace(/postgres(ql)?:\/\/\S+/gi, "[banco]").replace(/\s+/g, " ").slice(0, 160);
+      log.error("documents.storage_failed", { userId: user.id, detail });
+      throw new AppError(503, `Não consegui guardar o arquivo agora. (detalhe: ${detail})`, "storage");
     }
     sizeBytes = file.size;
     fileName = file.name.replace(/[^\w.\- À-ú]/g, "_").slice(0, 120);
