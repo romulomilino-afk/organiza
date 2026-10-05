@@ -2,7 +2,8 @@
  * Armazenamento de arquivos dos usuários (notas fiscais, contratos, documentos…).
  *
  * - Todo arquivo é criptografado (AES-256-GCM) ANTES de sair do servidor: nem o disco nem o bucket veem o conteúdo.
- * - Driver "local" (pasta ./storage) para desenvolvimento; "s3" para produção (AWS S3, Cloudflare R2, MinIO…).
+ * - Drivers: "local" (pasta ./storage, desenvolvimento), "netlify" (Netlify Blobs, automático no Netlify, sem configurar nada)
+ *   e "s3" (AWS S3, Cloudflare R2, MinIO…).
  * - O tipo do arquivo é conferido pelos primeiros bytes, não pela extensão.
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
@@ -10,7 +11,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILE_BYTES = 5 * 1024 * 1024; // o Netlify limita o tamanho do envio (~6 MB)
 export const USER_QUOTA_BYTES = 500 * 1024 * 1024;
 
 /** Detecta o tipo real pelo conteúdo. */
@@ -25,6 +26,7 @@ export function sniffMime(buf: Uint8Array): string | null {
   return null;
 }
 
+let warned = false;
 function encryptionKey(): Buffer {
   const k = process.env.FILES_ENCRYPTION_KEY;
   if (k) {
@@ -32,8 +34,9 @@ function encryptionKey(): Buffer {
     if (b.length !== 32) throw new Error("FILES_ENCRYPTION_KEY precisa ter 32 bytes (64 hex ou base64)");
     return b;
   }
-  if (process.env.NODE_ENV === "production") throw new Error("Configure FILES_ENCRYPTION_KEY em produção");
-  // desenvolvimento: deriva do AUTH_SECRET
+  // sem chave própria: deriva do AUTH_SECRET (segredo do servidor). Recomendado definir FILES_ENCRYPTION_KEY em produção.
+  if (process.env.NODE_ENV === "production" && !process.env.AUTH_SECRET) throw new Error("Configure FILES_ENCRYPTION_KEY ou AUTH_SECRET");
+  if (process.env.NODE_ENV === "production" && !warned) { warned = true; console.warn("[storage] FILES_ENCRYPTION_KEY ausente: usando chave derivada do AUTH_SECRET (não troque o AUTH_SECRET, ou os arquivos não abrem mais)."); }
   return createHash("sha256").update(`organiza-files:${process.env.AUTH_SECRET ?? "dev"}`).digest();
 }
 
@@ -51,7 +54,16 @@ export function decrypt(blob: Buffer): Buffer {
   return Buffer.concat([d.update(body), d.final()]);
 }
 
-const driver = () => (process.env.STORAGE_DRIVER === "s3" ? "s3" : "local");
+type Driver = "s3" | "netlify" | "local";
+const driver = (): Driver => {
+  const d = process.env.STORAGE_DRIVER;
+  if (d === "s3" || d === "netlify" || d === "local") return d;
+  return process.env.ORGANIZA_ON_NETLIFY === "1" || process.env.NETLIFY_BLOBS_CONTEXT ? "netlify" : "local";
+};
+async function blobs() {
+  const { getStore } = await import("@netlify/blobs");
+  return getStore({ name: "organiza-files", consistency: "strong" });
+}
 const localDir = () => path.resolve(process.env.STORAGE_DIR || "./storage");
 let s3: S3Client | null = null;
 function s3c() {
@@ -70,6 +82,8 @@ export async function putFile(userId: string, data: Buffer): Promise<string> {
   const blob = encrypt(data);
   if (driver() === "s3") {
     await s3c().send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, Body: blob, ContentType: "application/octet-stream" }));
+  } else if (driver() === "netlify") {
+    await (await blobs()).set(key, new Uint8Array(blob).buffer as ArrayBuffer);
   } else {
     const file = path.join(localDir(), key);
     await mkdir(path.dirname(file), { recursive: true });
@@ -84,11 +98,17 @@ export async function getFile(key: string): Promise<Buffer> {
     const r = await s3c().send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
     return decrypt(Buffer.from(await r.Body!.transformToByteArray()));
   }
+  if (driver() === "netlify") {
+    const ab = await (await blobs()).get(key, { type: "arrayBuffer" });
+    if (!ab) throw new Error("arquivo não encontrado");
+    return decrypt(Buffer.from(ab));
+  }
   return decrypt(await readFile(path.join(localDir(), key)));
 }
 
 export async function deleteFile(key: string): Promise<void> {
   if (!/^[\w-]+\/[\w-]+$/.test(key)) return;
   if (driver() === "s3") await s3c().send(new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
+  else if (driver() === "netlify") await (await blobs()).delete(key);
   else await rm(path.join(localDir(), key), { force: true });
 }

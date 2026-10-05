@@ -12,6 +12,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // gravado na hora do build: no Netlify, os arquivos vão para o Netlify Blobs (o disco do servidor é só leitura)
+  env: { ORGANIZA_ON_NETLIFY: process.env.NETLIFY === "true" ? "1" : "" },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

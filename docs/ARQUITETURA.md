@@ -263,7 +263,7 @@ O tick roda a cada 5 minutos. Para cada usuário que tem aparelho inscrito, ele 
 
 - **Chave:** `userId/uuid`.
 - **Download:** exige ser o dono e é servido com `Content-Disposition`, `nosniff` e uma CSP `sandbox`.
-- **Limites:** 10 MB por arquivo e 500 MB por usuário.
+- **Limites:** 4 MB por arquivo (fotos grandes são reduzidas no celular antes de enviar) e 500 MB por usuário.
 
 ### Pagamentos: `lib/billing.ts`
 

@@ -4,6 +4,22 @@ import { useRouter } from "next/navigation";
 
 const CATS = [["NOTA_FISCAL", "Nota fiscal"], ["DOCUMENTO", "Documento (RG, CNH…)"], ["CONTRATO", "Contrato"], ["GARANTIA", "Garantia"], ["MANUAL", "Manual"], ["OUTRO", "Outro"]];
 
+const MAX = 4 * 1024 * 1024; // o Netlify não aceita envios muito maiores que isso
+
+/** Foto grande do celular → JPEG menor (até 2000px), para caber no limite e subir rápido. */
+async function shrinkImage(file: File): Promise<File> {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size <= 1.2 * 1024 * 1024) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale); canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.82));
+    return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+  } catch { return file; }
+}
+
 export function DocumentUpload() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -15,9 +31,18 @@ export function DocumentUpload() {
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true); setError(null);
-    const res = await fetch("/api/documents", { method: "POST", body: new FormData(e.currentTarget) });
-    const data = await res.json().catch(() => ({}));
+    const fd = new FormData(e.currentTarget);
+    const f = fd.get("file");
+    if (f instanceof File && f.size > 0) {
+      const small = await shrinkImage(f);
+      if (small.size > MAX) { setBusy(false); return setError(f.type === "application/pdf" ? "O PDF passa de 4 MB. Tente uma versão menor (ou uma foto do documento)." : "A foto passa de 4 MB. Tente tirar de novo com menos zoom."); }
+      fd.set("file", small, small.name);
+    }
+    const res = await fetch("/api/documents", { method: "POST", body: fd }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
     setBusy(false);
+    if (!res) return setError("Sem conexão. Tente de novo.");
+    if (res.status === 413 && !data.error) return setError("O arquivo é grande demais. Envie um de até 4 MB.");
     if (!res.ok) return setError(data.error ?? "Não consegui guardar o documento.");
     formRef.current?.reset(); setOpen(false); router.refresh();
   }
@@ -41,8 +66,8 @@ export function DocumentUpload() {
       <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">Vencimento (opcional)
         <input name="expiresAt" type="date" className="field font-normal" />
       </label>
-      <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">Arquivo (PDF ou foto, até 10 MB)
-        <input name="file" type="file" accept="application/pdf,image/*" capture="environment" className="text-sm font-normal" />
+      <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">Arquivo (PDF ou foto, até 4 MB)
+        <input name="file" type="file" accept="application/pdf,image/*" className="text-sm font-normal" />
       </label>
       <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">Observações
         <textarea name="notes" rows={2} maxLength={500} className="field font-normal" />

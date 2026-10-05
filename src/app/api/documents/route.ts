@@ -35,13 +35,18 @@ export const POST = route("documents.upload", async (req: Request) => {
   let fileKey: string | null = null, mimeType: string | null = null, sizeBytes: number | null = null, fileName: string | null = null;
 
   if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_FILE_BYTES) throw new AppError(413, "Arquivo maior que 10 MB.", "too_large");
+    if (file.size > MAX_FILE_BYTES) throw new AppError(413, "Arquivo maior que 4 MB. Envie uma versão menor.", "too_large");
     const [{ used }] = await db.select({ used: sql<number>`coalesce(sum(${documents.sizeBytes}),0)::int` }).from(documents).where(eq(documents.userId, user.id));
     if (used + file.size > USER_QUOTA_BYTES) throw new AppError(413, "Seu espaço de 500 MB está cheio. Apague documentos antigos.", "quota");
     const buf = Buffer.from(await file.arrayBuffer());
     mimeType = sniffMime(buf);
     if (!mimeType) throw new AppError(415, "Envie PDF ou foto (JPG, PNG, WEBP, HEIC).", "unsupported");
-    fileKey = await putFile(user.id, buf);
+    try {
+      fileKey = await putFile(user.id, buf);
+    } catch (e) {
+      log.error("documents.storage_failed", { userId: user.id, error: e as Error });
+      throw new AppError(503, "Não consegui guardar o arquivo agora. Tente de novo em instantes.", "storage");
+    }
     sizeBytes = file.size;
     fileName = file.name.replace(/[^\w.\- À-ú]/g, "_").slice(0, 120);
   }
