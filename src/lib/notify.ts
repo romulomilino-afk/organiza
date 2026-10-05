@@ -10,6 +10,7 @@
 import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { unpaidInvoicesDue } from "./cards";
 import { ensureRoutines, openDeadlines } from "./watch";
+import { withCurrency } from "./money";
 import type { DB } from "@/db";
 import { notifications, pushSubscriptions, reminders, userPreferences, users, type User } from "@/db/schema";
 import { computeAlerts, type Alert } from "./data/alerts";
@@ -74,6 +75,10 @@ export function planNotifications(input: {
 
 /** Uma rodada para um usuário. */
 export async function notifyUser(db: DB, user: User, nowDate = new Date()): Promise<number> {
+  return withCurrency(user.currency, () => notifyUserInner(db, user, nowDate));
+}
+
+async function notifyUserInner(db: DB, user: User, nowDate: Date): Promise<number> {
   const [prefs] = await db.select().from(userPreferences).where(eq(userPreferences.userId, user.id)).limit(1);
   if (prefs && !prefs.notificationsEnabled) return 0;
   const tz = user.timezone;

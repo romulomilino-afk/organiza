@@ -12,6 +12,8 @@ import { loadCategories } from "../data/user-categories";
 import { cardsOverview } from "../cards";
 import { activeRoutines, openDeadlines } from "../watch";
 import { monthBudget } from "../budget";
+import { getRates, rate } from "../fx";
+import { CURRENCIES, isCurrency, type Currency } from "../money";
 import { hasFeature } from "../plans";
 
 /**
@@ -42,6 +44,10 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
   ]);
   const budget = hasFeature(access.plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
   const r2 = (c: number) => Math.round(c) / 100;
+  const myCur: Currency = isCurrency(user.currency) ? user.currency : "BRL";
+  const fx = await getRates(db, today);
+  const cotacoes = fx ? Object.fromEntries((["BRL", "USD", "EUR"] as Currency[]).filter((c) => c !== myCur)
+    .map((c) => [`1 ${c} em ${myCur}`, Math.round(rate(c, myCur, fx) * 10000) / 10000])) : null;
   const catOut = (c: { key: string; name: string; custom: boolean; keywords: string[] }) =>
     ({ key: c.key, name: c.name, ...(c.custom ? { criada_pelo_usuario: true } : {}), ...(c.keywords.length ? { palavras: c.keywords } : {}) });
 
@@ -72,6 +78,8 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     lista_de_compras: shop.map((i) => i.name),
     lembretes: rems.slice(0, 40).map((r) => ({ id: r.id, text: r.text, date: r.date, time: r.time })),
     categorias: { despesa: cats.expense().map(catOut), receita: cats.income().map(catOut) },
+    moeda_do_usuario: { codigo: myCur, simbolo: CURRENCIES[myCur].symbol, nome: CURRENCIES[myCur].name },
+    cotacoes_hoje: cotacoes ? { ...cotacoes, data: fx!.day } : null,
     orcamento: budget ? {
       receita_do_mes: r2(budget.incomeCents), ja_recebido: r2(budget.receivedCents), receita_fixa_ainda_vai_cair: r2(budget.expectedIncomeCents),
       ja_gasto_inclui_parcelas: r2(budget.spentCents), contas_a_pagar_no_mes: r2(budget.pendingBillsCents), fixos_que_ainda_vao_sair: r2(budget.fixedToComeCents), assinaturas: r2(budget.subscriptionsCents),

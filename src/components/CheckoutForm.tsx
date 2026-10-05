@@ -10,6 +10,11 @@ export function CheckoutForm({ plan, label, needsDocument }: { plan: "PREMIUM" |
   return (
     <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="plan" value={plan} />
+      <input type="hidden" name="method" value="CREDIT_CARD" />
+      <div className="rounded-2xl border border-accent bg-accent-soft px-3 py-2.5">
+        <b className="block text-[15px]">💳 Cartão de crédito</b>
+        <span className="text-[13px] text-ink-3">Cobrança automática todo mês. Você não precisa lembrar de pagar.</span>
+      </div>
       {needsDocument && (
         <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">CPF ou CNPJ
           <input name="doc" required inputMode="numeric" autoComplete="off" maxLength={18} placeholder="000.000.000-00" className="field font-normal" />
@@ -17,8 +22,8 @@ export function CheckoutForm({ plan, label, needsDocument }: { plan: "PREMIUM" |
         </label>
       )}
       {state?.error && <p role="alert" className="rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad">{state.error}</p>}
-      <button disabled={pending} className="btn w-full">{pending ? "Gerando fatura…" : "Ir para o pagamento"}</button>
-      <p className="text-center text-xs text-ink-3">Você escolhe Pix, boleto ou cartão na próxima tela. Cancele quando quiser.</p>
+      <button disabled={pending} className="btn w-full">{pending ? "Abrindo pagamento…" : "Ir para o pagamento"}</button>
+      <p className="text-center text-xs text-ink-3">🔒 Você digita o cartão na página segura do Asaas. O Organiza não vê nem guarda os dados do cartão. Cancele quando quiser.</p>
     </form>
   );
 }

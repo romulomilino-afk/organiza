@@ -8,6 +8,9 @@ import { addCategoryForm, deleteCategory } from "@/actions/categories";
 import { payInvoiceAction } from "@/actions/cards";
 import { unpaidInvoicesDue } from "@/lib/cards";
 import { FinanceTabs } from "@/components/FinanceTabs";
+import { convert, getRates, rate } from "@/lib/fx";
+import { CURRENCIES, isCurrency, type Currency } from "@/lib/money";
+import { fmtBR } from "@/lib/dates";
 import { explainSimulation, monthBudget, simulate } from "@/lib/budget";
 import { addDays } from "@/lib/dates";
 import { hasFeature, type PlanId } from "@/lib/plans";
@@ -16,7 +19,7 @@ import { addFixed, cancelFixed } from "@/actions/fixed";
 import { deleteExpense, deleteIncome, payBill } from "@/actions/items";
 import { Empty, PageHeader, SmallButton, XButton } from "@/components/ui";
 
-export default async function FinanceiroPage({ searchParams }: { searchParams: Promise<{ valor?: string; parcelas?: string }> }) {
+export default async function FinanceiroPage({ searchParams }: { searchParams: Promise<{ valor?: string; parcelas?: string; cv?: string; de?: string; para?: string }> }) {
   const sp = await searchParams;
   const { user, access } = await requirePageAccess();
   if (!hasFeature(access.plan, "financeiro")) {
@@ -37,6 +40,14 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
   const [fin, bills, subs, fam, fixos, ucats] = await Promise.all([monthFinance(db, user.id, today), pendingBills(db, access), activeSubscriptions(db, user.id), householdFinance(db, access, today), fixedItems(db, user.id), loadCategories(db, user.id)]);
   const faturas = await unpaidInvoicesDue(db, user.id, today, addDays(today, 30));
   const budget = await monthBudget(db, user.id, today, user.timezone);
+  const myCur: Currency = isCurrency(user.currency) ? user.currency : "BRL";
+  const sym = CURRENCIES[myCur].symbol;
+  // conversor de moedas
+  const fx = await getRates(db, today);
+  const cvValor = sp.cv ? Number(String(sp.cv).replace(/\./g, "").replace(",", ".")) : NaN;
+  const cvDe: Currency = isCurrency(sp.de) ? sp.de : myCur === "BRL" ? "USD" : "BRL";
+  const cvPara: Currency = isCurrency(sp.para) ? sp.para : myCur;
+  const cvOut = fx && cvValor > 0 && cvValor < 1e9 ? convert(Math.round(cvValor * 100), cvDe, cvPara, fx) : null;
   const simValor = sp.valor ? Number(String(sp.valor).replace(/\./g, "").replace(",", ".")) : NaN;
   const simN = Math.min(48, Math.max(1, Number(sp.parcelas ?? 1) || 1));
   const sim = simValor > 0 && simValor < 10_000_000 ? { text: explainSimulation(budget, Math.round(simValor * 100), simN), r: simulate(budget, Math.round(simValor * 100), simN) } : null;
@@ -97,7 +108,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
                 </div>
               </details>
               <form className="mt-3 grid grid-cols-[1fr_6.5rem] gap-2 border-t border-line pt-3" action="/financeiro#posso-gastar">
-                <input name="valor" required inputMode="decimal" pattern="[0-9.,]+" defaultValue={sp.valor ?? ""} placeholder="Quero comprar algo de R$…" className="field" aria-label="Valor da compra" />
+                <input name="valor" required inputMode="decimal" pattern="[0-9.,]+" defaultValue={sp.valor ?? ""} placeholder={`Quero comprar algo de ${sym}…`} className="field" aria-label="Valor da compra" />
                 <select name="parcelas" defaultValue={String(simN)} className="field" aria-label="Parcelas">
                   {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? "À vista" : `${n}x`}</option>)}
                 </select>
@@ -108,6 +119,35 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
               )}
             </>
           ) : <Empty>Me conta sua renda e eu calculo quanto você pode gastar sem se apertar. Diga: “meu salário de 4.000 cai todo dia 5”.</Empty>}
+        </div>
+
+        <div className="card" id="conversor">
+          <div className="eyebrow mb-2">💱 Conversor de moedas</div>
+          {fx ? (
+            <>
+              <form action="/financeiro#conversor" className="grid grid-cols-[1fr_auto_auto] items-center gap-2">
+                <input name="cv" required inputMode="decimal" pattern="[0-9.,]+" defaultValue={sp.cv ?? ""} placeholder="Valor" className="field" aria-label="Valor" />
+                <select name="de" defaultValue={cvDe} className="field" aria-label="De">
+                  {Object.entries(CURRENCIES).map(([k, c]) => <option key={k} value={k}>{c.flag} {k}</option>)}
+                </select>
+                <select name="para" defaultValue={cvPara} className="field" aria-label="Para">
+                  {Object.entries(CURRENCIES).map(([k, c]) => <option key={k} value={k}>→ {c.flag} {k}</option>)}
+                </select>
+                <button className="btn col-span-3">Converter</button>
+              </form>
+              {cvOut !== null && (
+                <p className="mt-3 rounded-xl bg-accent-soft px-3 py-2 text-[15px]">
+                  <b className="num">{brl(Math.round(cvValor * 100), cvDe)}</b> = <b className="num">{brl(cvOut, cvPara)}</b>
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-ink-3">
+                {(["USD", "EUR", "BRL"] as Currency[]).filter((c) => c !== myCur).map((c) => (
+                  <span key={c}>1 {CURRENCIES[c].symbol} = <b className="num">{brl(Math.round(rate(c, myCur, fx) * 100), myCur)}</b></span>
+                ))}
+                <span>· cotação de {fmtBR(fx.day)}</span>
+              </div>
+            </>
+          ) : <Empty>Não consegui buscar a cotação agora. Tente de novo mais tarde.</Empty>}
         </div>
 
         <div className="card">
@@ -144,7 +184,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
               </select>
               <input name="name" required maxLength={80} placeholder="Nome (ex.: Salário, Aluguel)" className="field" aria-label="Nome" />
               <div className="grid grid-cols-2 gap-2">
-                <input name="amount" required inputMode="decimal" pattern="[0-9.,]+" placeholder="Valor (R$)" className="field" aria-label="Valor" />
+                <input name="amount" required inputMode="decimal" pattern="[0-9.,]+" placeholder={`Valor (${sym})`} className="field" aria-label="Valor" />
                 <input name="day" required type="number" min={1} max={31} inputMode="numeric" placeholder="Todo dia…" className="field" aria-label="Dia do mês" />
               </div>
               <button className="btn">Salvar</button>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getDb } from "@/db";
 import { requirePageAccess } from "@/lib/session";
 import { MESES, fmtBR, fmtShort, todayIn } from "@/lib/dates";
-import { brl } from "@/lib/money";
+import { brl, CURRENCIES, currentCurrency } from "@/lib/money";
 import { hasFeature } from "@/lib/plans";
 import { cardsOverview, firstDueDate, type Invoice } from "@/lib/cards";
 import { loadCategories } from "@/lib/data/user-categories";
@@ -188,7 +188,7 @@ export default async function CartoesPage() {
               </select>
               <input name="description" required maxLength={120} placeholder="O que comprou (ex.: TV, Mercado)" className="field" aria-label="Descrição" />
               <div className="grid grid-cols-2 gap-2">
-                <input name="amount" required inputMode="decimal" pattern="[0-9.,]+" placeholder="Valor total (R$)" className="field" aria-label="Valor total" />
+                <input name="amount" required inputMode="decimal" pattern="[0-9.,]+" placeholder={`Valor total (${CURRENCIES[currentCurrency()].symbol})`} className="field" aria-label="Valor total" />
                 <select name="installments" className="field" defaultValue="1" aria-label="Parcelas">
                   {Array.from({ length: 24 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? "À vista" : `${n}x`}</option>)}
                 </select>

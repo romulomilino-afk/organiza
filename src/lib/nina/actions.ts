@@ -15,6 +15,7 @@ const optReais = reais.nullish().transform((v) => v ?? undefined);
 const idRef = z.string().trim().min(1).max(64);
 const items = z.array(txt(80)).min(1).max(50);
 const shared = z.boolean().nullish().transform((v) => v ?? false); // compartilhar com a família
+const cur = z.enum(["BRL", "USD", "EUR"]).nullish(); // moeda que a pessoa falou (o app converte para a dela)
 
 export const ActionSchema = z.discriminatedUnion("type", [
   // Agenda
@@ -34,7 +35,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
   // Financeiro
   z.object({ type: z.literal("add_transaction"), kind: z.enum(["expense", "income"]), amount: reais,
     category: z.string().default("outros"), description: txt(120),
-    method: z.enum(["cartao", "pix", "dinheiro", "debito", "boleto"]).nullish(), date: optDay, shared }),
+    method: z.enum(["cartao", "pix", "dinheiro", "debito", "boleto"]).nullish(), date: optDay, shared, currency: cur }),
   z.object({ type: z.literal("add_bill"), name: txt(80), amount: optReais,
     dueDay: z.coerce.number().int().min(1).max(31).nullish(), dueDate: optDay, recurring: z.boolean().default(false) })
     .refine((a) => a.dueDay || a.dueDate, "conta precisa de dueDay ou dueDate"),
@@ -42,7 +43,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
   // Fixos do mês: receita fixa (lança sozinha), despesa fixa (auto=true lança sozinha como paga; auto=false vira conta a pagar)
   z.object({ type: z.literal("add_fixed"), kind: z.enum(["income", "expense"]), name: txt(80), amount: reais,
     day: z.coerce.number().int().min(1).max(31), category: z.string().default("outros"),
-    auto: z.boolean().nullish().transform((v) => v ?? true) }),
+    auto: z.boolean().nullish().transform((v) => v ?? true), currency: cur }),
   z.object({ type: z.literal("update_fixed"), id: idRef, amount: optReais,
     day: z.coerce.number().int().min(1).max(31).nullish(), name: txt(80).nullish() }),
   z.object({ type: z.literal("cancel_fixed"), id: idRef }),
@@ -67,7 +68,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
     dueDay: z.coerce.number().int().min(1).max(31).nullish(), limit: optReais }),
   z.object({ type: z.literal("delete_card"), card: txt(40) }),
   z.object({ type: z.literal("add_card_purchase"), card: txt(40).nullish(), description: txt(120), amount: optReais, installmentAmount: optReais,
-    installments: z.coerce.number().int().min(1).max(48).nullish().transform((v) => v ?? 1), date: optDay, category: z.string().default("outros") })
+    installments: z.coerce.number().int().min(1).max(48).nullish().transform((v) => v ?? 1), date: optDay, category: z.string().default("outros"), currency: cur })
     .refine((a) => a.amount || a.installmentAmount, "compra precisa de amount ou installmentAmount"),
   z.object({ type: z.literal("pay_invoice"), card: txt(40).nullish() }),
   z.object({ type: z.literal("cancel_card_purchase"), id: idRef }),

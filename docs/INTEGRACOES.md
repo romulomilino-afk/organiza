@@ -42,7 +42,8 @@ Guia de configuração de cada serviço externo do Organiza. Nenhum deles é obr
    - **URL:** `https://SEU-DOMINIO/api/webhooks/asaas`
    - **Token de autenticação:** o valor de `ASAAS_WEBHOOK_TOKEN` (com 32 caracteres ou mais)
    - **Versão da API:** v3
-   - **Eventos:** `PAYMENT_CREATED`, `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED`, `PAYMENT_OVERDUE`, `PAYMENT_REFUNDED`, `PAYMENT_CHARGEBACK_REQUESTED`, `SUBSCRIPTION_DELETED` e `SUBSCRIPTION_INACTIVATED`
+   - **Eventos:** `PAYMENT_CREATED`, `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED`, `PAYMENT_OVERDUE`, `PAYMENT_REFUNDED`, `PAYMENT_CHARGEBACK_REQUESTED`, `SUBSCRIPTION_CREATED`, `SUBSCRIPTION_DELETED` e `SUBSCRIPTION_INACTIVATED`
+3b. **Cartão automático (Asaas Checkout recorrente):** em **Minha conta → Informações comerciais**, preencha o **site** com o seu domínio (ex.: `https://meuorganiza.com.br`). O Asaas só aceita voltar para o app depois do pagamento se o domínio estiver cadastrado ali. O cliente digita o cartão na página do Asaas, e o Organiza nunca vê os dados do cartão.
 4. **Teste:**
    1. No app, entre em **Planos → Assinar Premium**.
    2. Informe um CPF de teste válido, por exemplo 529.982.247-25.

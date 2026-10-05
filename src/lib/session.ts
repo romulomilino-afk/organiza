@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import { users, type User } from "@/db/schema";
 import { unauthorized } from "./errors";
 import { getAccess, type Access } from "./access";
+import { setRequestCurrency } from "./money";
 
 /**
  * Único ponto de onde sai o userId usado nas consultas.
@@ -16,6 +17,7 @@ export async function currentUser(): Promise<User | null> {
   const id = session?.user?.id;
   if (!id) return null;
   const [u] = await getDb().select().from(users).where(eq(users.id, id)).limit(1);
+  if (u) setRequestCurrency(u.currency); // moeda da pessoa para toda a tela
   return u ?? null;
 }
 

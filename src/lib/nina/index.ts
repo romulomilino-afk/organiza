@@ -16,6 +16,8 @@ import { ACTION_FEATURE, hasFeature, PLANS, type PlanId } from "../plans";
 import { ensureRecurringBills } from "../data/queries";
 import { loadCategories } from "../data/user-categories";
 import { cardsOverview } from "../cards";
+import { currencyInText, isCurrency, withCurrency } from "../money";
+import { getRates } from "../fx";
 import { monthBudget } from "../budget";
 import { activeConversationId } from "../data/user-setup";
 import { monthKey, todayIn } from "../dates";
@@ -59,6 +61,11 @@ function gateByPlan(plan: PlanId, actions: Action[]) {
 }
 
 export async function handleMessage(db: DB, user: User, text: string, source: "TEXT" | "VOICE" = "TEXT", accessIn?: Access): Promise<{ user: ChatMessage; assistant: ChatMessage; mode: "ai" | "rules" }> {
+  // valores na moeda da pessoa em tudo que a Nina responder
+  return withCurrency(user.currency, () => handleMessageInner(db, user, text, source, accessIn));
+}
+
+async function handleMessageInner(db: DB, user: User, text: string, source: "TEXT" | "VOICE" = "TEXT", accessIn?: Access): Promise<{ user: ChatMessage; assistant: ChatMessage; mode: "ai" | "rules" }> {
   const access = accessIn ?? await getAccess(db, user);
   const plan = access.plan;
   const usage = await usageThisMonth(db, user, plan);
@@ -94,8 +101,9 @@ export async function handleMessage(db: DB, user: User, text: string, source: "T
     const lastU = [...history].reverse().find((m) => m.role === "USER");
     const cats = await loadCategories(db, user.id);
     const cards = (await cardsOverview(db, user.id, today)).map((c) => ({ ...c.card, usedCents: c.usedCents }));
+    const rates = currencyInText(text) || /cota[cç][aã]o|convert/i.test(text) ? await getRates(db, today) : null;
     const budget = /\b(posso|consigo|da pra|dá pra|quanto).{0,30}(gastar|comprar)/i.test(text) && hasFeature(plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
-    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards, budget, financeEnabled: hasFeature(plan, "financeiro") }));
+    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards, budget, financeEnabled: hasFeature(plan, "financeiro"), currency: (isCurrency(user.currency) ? user.currency : "BRL"), rates }));
   }
 
   const { allowed, note } = gateByPlan(plan, out.actions);

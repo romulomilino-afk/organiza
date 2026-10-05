@@ -44,6 +44,7 @@ export const users = pgTable("users", {
   plan: planEnum("plan").notNull().default("FREE"),
   onboarded: boolean("onboarded").notNull().default(false),
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
+  currency: text("currency").notNull().default("BRL"), // BRL | USD | EUR
   asaasCustomerId: text("asaas_customer_id"),
   phone: text("phone").unique(),                 // WhatsApp vinculado, formato E.164 sem "+"
   phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true, mode: "date" }),
@@ -382,6 +383,7 @@ export const billingSubscriptions = pgTable("billing_subscriptions", {
   currentPeriodEnd: date("current_period_end", { mode: "string" }),
   overdueSince: date("overdue_since", { mode: "string" }),
   lastInvoiceUrl: text("last_invoice_url"),
+  method: text("method").notNull().default("UNDEFINED"), // CREDIT_CARD (automático) | UNDEFINED (Pix/boleto/cartão na fatura)
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("billing_user_idx").on(t.userId, t.status)]);
@@ -484,6 +486,14 @@ export const cardInvoicePayments = pgTable("card_invoice_payments", {
   amountCents: integer("amount_cents").notNull(),
   paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("card_invoice_paid_uq").on(t.cardId, t.dueDate)]);
+
+/** Cotações do dia (base USD), buscadas uma vez por dia. */
+export const fxRates = pgTable("fx_rates", {
+  day: date("day", { mode: "string" }).primaryKey(),
+  rates: jsonb("rates").$type<Record<string, number>>().notNull(),
+  source: text("source").notNull(),
+  createdAt: createdAt(),
+});
 
 export type User = typeof users.$inferSelect;
 export type CreditCard = typeof creditCards.$inferSelect;

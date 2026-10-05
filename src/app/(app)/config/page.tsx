@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CURRENCIES } from "@/lib/money";
 import { APP_VERSION } from "@/lib/version";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -8,7 +9,7 @@ import { PLANS, hasFeature } from "@/lib/plans";
 import { memories } from "@/lib/data/queries";
 import { usageThisMonth } from "@/lib/nina";
 import { whatsappEnabled } from "@/lib/whatsapp";
-import { deleteMemory, logout, updateName } from "@/actions/items";
+import { deleteMemory, logout, setCurrencyAction, updateName } from "@/actions/items";
 import { saveNotificationPrefs } from "@/actions/casa";
 import { disconnectWhatsApp } from "@/actions/whatsapp";
 import { Empty, PageHeader, XButton } from "@/components/ui";
@@ -34,6 +35,20 @@ export default async function ConfigPage() {
           <form action={updateName} className="flex gap-2">
             <input name="name" defaultValue={user.name ?? ""} required maxLength={80} aria-label="Seu nome" className="field min-w-0 flex-1 py-2.5" />
             <button className="btn btn-ghost">Salvar</button>
+          </form>
+        </div>
+
+        <div className="card flex flex-col gap-3">
+          <div className="eyebrow">Moeda</div>
+          <form action={setCurrencyAction} className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <select name="currency" defaultValue={user.currency} aria-label="Moeda" className="field min-w-0 flex-1 py-2.5">
+                {Object.entries(CURRENCIES).map(([k, c]) => <option key={k} value={k}>{c.flag} {c.name} ({c.symbol})</option>)}
+              </select>
+              <button className="btn btn-ghost">Salvar</button>
+            </div>
+            <label className="flex items-start gap-2 text-sm text-ink-2"><input type="checkbox" name="convert" className="mt-0.5 h-4 w-4" /> Converter os valores que já registrei pela cotação de hoje</label>
+            <p className="text-[13px] text-ink-3">Sem marcar, os números continuam iguais e só o símbolo muda. Os planos do Organiza são cobrados em reais.</p>
           </form>
         </div>
 

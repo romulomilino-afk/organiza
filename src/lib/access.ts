@@ -16,6 +16,7 @@ export type Access = {
   plan: PlanId;          // plano efetivo (membros de família herdam FAMILY)
   ownPlan: PlanId;
   timezone: string;
+  currency: string;
   household: { id: string; name: string; role: "OWNER" | "MEMBER"; ownerId: string; shareFinance: boolean; active: boolean } | null;
 };
 
@@ -33,14 +34,14 @@ export async function getAccess(db: DB, user: User): Promise<Access> {
   const active = !!m && m.ownerPlan === "FAMILY";
   const plan: PlanId = active ? "FAMILY" : ownPlan;
   return {
-    userId: user.id, plan, ownPlan, timezone: user.timezone,
+    userId: user.id, plan, ownPlan, timezone: user.timezone, currency: user.currency ?? "BRL",
     household: m ? { id: m.id, name: m.name, role: m.role, ownerId: m.ownerId, shareFinance: m.shareFinance, active } : null,
   };
 }
 
 /** Acesso de quem não participa de família (testes e canais sem família). */
-export function soloAccess(user: Pick<User, "id" | "plan" | "timezone">): Access {
-  return { userId: user.id, plan: user.plan as PlanId, ownPlan: user.plan as PlanId, timezone: user.timezone, household: null };
+export function soloAccess(user: Pick<User, "id" | "plan" | "timezone"> & { currency?: string | null }): Access {
+  return { userId: user.id, plan: user.plan as PlanId, ownPlan: user.plan as PlanId, timezone: user.timezone, currency: user.currency ?? "BRL", household: null };
 }
 
 export function sharedHouseholdId(a: Access): string | null {

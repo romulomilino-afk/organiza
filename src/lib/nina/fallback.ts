@@ -7,7 +7,8 @@ import { addDays, dateInMonth, addMonths, weekday, cap, relDay, fmtBR, MESES } f
 import { firstDueDate } from "../cards";
 import { parseMonthDate } from "../watch";
 import { explainFree, explainSimulation, type Budget } from "../budget";
-import { brl, toCents } from "../money";
+import { brl, toCents, currencyInText, CURRENCIES, type Currency } from "../money";
+import { convert, rate, type Rates } from "../fx";
 
 type Out = { reply: string; actions: Record<string, unknown>[]; suggestion?: Record<string, unknown> | null };
 
@@ -58,7 +59,7 @@ export function parseTime(text: string): string | null {
 
 export function parseMoney(text: string): number | null {
   const s = text.toLowerCase().replace(/(\d)\.(\d{3})/g, "$1$2");
-  const m = s.match(/r\$\s*(\d+(?:,\d{1,2})?)/) || s.match(/(\d+(?:,\d{1,2})?)\s*(?:reais|real|conto|pila)/) || s.match(/\bpor\s+(\d+(?:[.,]\d{1,2})?)\b/)
+  const m = s.match(/(?:r|us|u)\$\s*(\d+(?:,\d{1,2})?)/) || s.match(/€\s*(\d+(?:,\d{1,2})?)/) || s.match(/(\d+(?:,\d{1,2})?)\s*(?:reais|real|conto|pila|d[oó]lares|d[oó]lar|euros?)\b/) || s.match(/\bpor\s+(\d+(?:[.,]\d{1,2})?)\b/)
     || s.match(/\b(?:gastei|paguei|recebi|ganhei)\s+(\d+(?:[.,]\d{1,2})?)\b/);
   if (!m) return null;
   const v = Number(m[1].replace(",", "."));
@@ -106,8 +107,11 @@ function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
 const catName = (key: string) => userCats.find((c) => c.key === key)?.name ?? CAT_NAME[key] ?? "Outros";
 
 export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {},
-  opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[]; budget?: Budget | null; financeEnabled?: boolean } = {}): Out {
+  opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[]; budget?: Budget | null; financeEnabled?: boolean; currency?: Currency; rates?: Rates | null } = {}): Out {
   const sN = norm(text);
+  // conversão: "quanto é 100 dólares em reais?", "cotação do euro"
+  const conv = convertQuestion(text, sN, opts.currency ?? "BRL", opts.rates ?? null);
+  if (conv) return conv;
   // "Posso gastar?" — pergunta respondida com o orçamento do mês
   if (/\b(posso|consigo|da pra|da para)\b.{0,30}\b(gastar|comprar)\b|quanto (eu )?posso gastar|quanto (da|sobra) (pra|para) gastar/.test(sN)) {
     if (opts.financeEnabled === false) return { reply: "O “Posso gastar?” faz parte do plano Premium: eu analiso renda, contas, fixos, cartão e assinaturas para te dizer quanto sobra. 💡", actions: [] };
@@ -123,6 +127,17 @@ export function fallbackNina(text: string, today: string, history: { lastUser?: 
   userCardsList = opts.cards ?? [];
   let out: Out;
   try { out = fallbackCore(text, today, history); } finally { userCats = []; userCardsList = []; }
+  // valor dito em outra moeda: a ação leva a moeda e o app converte; a resposta mostra os dois valores
+  const said = currencyInText(text), mine = opts.currency ?? "BRL";
+  if (said && said !== mine) {
+    let changed = false;
+    for (const a of out.actions) if (["add_transaction", "add_card_purchase", "add_fixed"].includes(String(a.type))) { a.currency = said; changed = true; }
+    if (changed) {
+      const amt = Number(out.actions.find((a) => a.amount || a.installmentAmount)?.amount ?? 0);
+      const approx = amt && opts.rates ? ` (≈ ${brl(convert(toCents(amt), said, mine, opts.rates), mine)})` : "";
+      out.reply = out.reply.replace(new RegExp(`${brl(toCents(amt), mine).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), `${brl(toCents(amt), said)}${approx}`);
+    }
+  }
   // na família: "a gente", "família", "casa", "nós"… compartilha compromissos e tarefas
   if (opts.family && /\b(familia|família|a gente|nós|nos vamos|compartilh|todo mundo|lá em casa)\b/i.test(text)) {
     for (const a of out.actions) if (a.type === "add_event" || a.type === "add_task") a.shared = true;
@@ -267,6 +282,23 @@ function parseWatch(raw: string, s: string, today: string): Out | null {
     };
   }
   return null;
+}
+
+/** "quanto é 100 dólares em reais?", "converte 50 euros para dólar", "cotação do dólar" */
+function convertQuestion(raw: string, s: string, mine: Currency, rates: Rates | null): Out | null {
+  const ask = /\b(quanto (e|eh|da|vale|sao|fica|ficam|custa)|converte|converter|conversao|cotacao|quanto ta|quanto esta)\b/.test(s);
+  if (!ask) return null;
+  const words: [RegExp, Currency][] = [[/\b(dolar|dolares|usd)\b|us\$/, "USD"], [/\b(euro|euros|eur)\b|€/, "EUR"], [/\b(real|reais|brl)\b|r\$/, "BRL"]];
+  const [before, after] = s.split(/\s+(?:em|para|pra|no|na)\s+(?=(?:dolar|dolares|euro|euros|real|reais|usd|eur|brl))/);
+  const from = words.find(([re]) => re.test(before))?.[1] ?? null;
+  const to = (after ? words.find(([re]) => re.test(after))?.[1] : null) ?? (from === mine ? (mine === "BRL" ? "USD" : "BRL") : mine);
+  if (!from) return null;
+  if (!rates) return { reply: "Não consegui a cotação agora. Tente de novo em alguns minutos. 💱", actions: [] };
+  const n = s.replace(/(\d)\.(\d{3})/g, "$1$2").match(/(\d+(?:,\d{1,2})?)/);
+  const amount = n ? Number(n[1].replace(",", ".")) : 1;
+  const out = convert(toCents(amount), from, to, rates);
+  const one = Math.round(rate(from, to, rates) * 100);
+  return { reply: `${brl(toCents(amount), from)} dá ${brl(out, to)} pela cotação de ${fmtBR(rates.day)} (1 ${CURRENCIES[from].symbol} = ${brl(one, to)}). 💱`, actions: [] };
 }
 
 const BANKS = /\b(nubank|nu|inter|itau|bradesco|santander|caixa|c6|bb|banco do brasil|next|picpay|mercado pago|neon|original|pan|xp|porto( seguro)?|carrefour|riachuelo|renner|sicredi|sicoob|will|ourocard|elo|visa|mastercard|amex|digio|btg|credicard|hipercard|magalu|americanas)\b/;
@@ -477,7 +509,7 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
     }
     const cat = matchUserCat(s, "EXPENSE")?.key ?? guessCategory(s);
     const method = /cartao|credito/.test(s) ? "cartao" : /\bpix\b/.test(s) ? "pix" : /dinheiro/.test(s) ? "dinheiro" : /debito/.test(s) ? "debito" : undefined;
-    const descMatch = raw.match(/(?:comprei|gastei|paguei)\s+(?:(?:r\$\s*)?[\d.,]+\s*(?:reais|real)?\s*)?(?:com |no |na |em |de |um |uma |o |a )?([^\d,.]{3,40}?)(?:\s+(?:por|hoje|no cart|com|de)\b|\s+r\$|\s+\d|[,.]|$)/i);
+    const descMatch = raw.match(/(?:comprei|gastei|paguei)\s+(?:(?:r\$|us\$|u\$|€)?\s*[\d.,]+\s*(?:reais|real|d[oó]lares|d[oó]lar|euros?)?\s*)?(?:com |no |na |em |de |um |uma |o |a )?([^\d,.]{3,40}?)(?:\s+(?:por|hoje|no cart|com|de)\b|\s+r\$|\s+\d|[,.]|$)/i);
     const description = cap(descMatch?.[1]?.replace(/^(no|na|em|um|uma|o|a)\s+/i, "") || catName(cat));
     actions.push({ type: "add_transaction", kind: "expense", amount: val, category: cat, description, method });
     const durable = /(ar-condicionado|geladeira|fogao|\btv\b|televis|notebook|celular|maquina de lavar|sofa)/.test(s);

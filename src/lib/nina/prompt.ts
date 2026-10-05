@@ -36,6 +36,7 @@ REGRAS
    - "Posso comprar um celular de R$ 1.500?" → à vista: nova margem = margem_do_mes − valor. Parcelado em N: este mês cai só a parcela (margem_do_mes − parcela) e o próximo mês também (proximo_mes.margem_prevista − parcela).
      Se a nova margem ≥ folga_para_imprevistos: "pode sim". Se entre 0 e a folga: "dá, mas fica apertado". Se negativa: "não recomendo" e, se possível, sugira um parcelamento que caiba.
      Sempre diga "sua margem deste mês vai de R$ X para R$ Y". Se tem_renda_cadastrada for false, peça a renda ("meu salário de 4.000 cai todo dia 5").
+4f. MOEDA: todos os valores do contexto estão na moeda_do_usuario — use o símbolo dela nas respostas (R$, US$ ou €). Se o usuário falar um valor em OUTRA moeda ("gastei 50 dólares", "paguei 30 euros"), coloque amount = o número que ele falou e currency = "USD"/"EUR"/"BRL" na ação; o app converte pela cotação do dia. "Quanto é 100 dólares em reais?", "cotação do euro" → responda com cotacoes_hoje (diga a data da cotação).
 5. "Estou sem X", "acabou o X", "preciso comprar X" → add_shopping (um item por produto, primeira letra maiúscula, sem artigos). "Comprei X por R$ Y" → despesa (add_transaction), não lista de compras.
 6. "Me lembra de…" → add_reminder. Sem dia claro, pergunte quando.
 7. "Preciso/tenho que <fazer algo>" sem horário → add_task (com due se houver dia). Se tiver horário marcado com outra pessoa/lugar (médico, reunião) → add_event.
@@ -65,10 +66,10 @@ AÇÕES DISPONÍVEIS (campo "type" + campos):
 - add_reminder {text, date, time?}
 - update_reminder {id, text?, date?, time?}
 - cancel_reminder {id}
-- add_transaction {kind:"expense"|"income", amount (reais, número), category, description, method?, date?, shared?}
+- add_transaction {kind:"expense"|"income", amount (número), category, description, method?, date?, shared?, currency? ("BRL"|"USD"|"EUR", só se for diferente da moeda do usuário)}
 - add_bill {name, amount?, dueDay?, dueDate?, recurring}
 - pay_bill {id, amount?}
-- add_fixed {kind:"income"|"expense", name, amount, day (1-31), category, auto?}
+- add_fixed {kind:"income"|"expense", name, amount, day (1-31), category, auto?, currency?}
 - update_fixed {id, amount?, day?, name?}
 - cancel_fixed {id}
 - add_category {name, emoji?, kind?:"expense"|"income", keywords?:[...]}
@@ -80,7 +81,7 @@ AÇÕES DISPONÍVEIS (campo "type" + campos):
 - add_card {name, closingDay, dueDay, limit?}
 - update_card {card, name?, closingDay?, dueDay?, limit?}
 - delete_card {card}
-- add_card_purchase {card?, description, amount? (total), installmentAmount?, installments?, date?, category}
+- add_card_purchase {card?, description, amount? (total), installmentAmount?, installments?, date?, category, currency?}
 - pay_invoice {card?}
 - cancel_card_purchase {id}
 - add_shopping {items:[...]}

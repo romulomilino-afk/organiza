@@ -50,7 +50,7 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
 |---|---|
 | `npm run dev` / `npm run build && npm start` | Desenvolvimento / produção |
 | `npm run worker` | Roda o "tick" (avisos e assinaturas) a cada 5 minutos, localmente |
-| `npm test` | 42 testes de ponta a ponta, contra um Postgres real em memória (PGlite), sem Docker |
+| `npm test` | 50 testes de ponta a ponta, contra um Postgres real em memória (PGlite), sem Docker |
 | `npm run typecheck` | Checagem de tipos |
 | `npm run secrets` | Gera AUTH_SECRET, CRON_SECRET, a chave de arquivos, as chaves VAPID e os tokens de webhook |
 | `npm run db:generate` / `npm run db:migrate` | Gera / aplica migrações |
@@ -115,6 +115,11 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
 - **Posso gastar?**
   - Calcula a margem do mês: receitas previstas menos gastos, contas, fixos, parcelas do cartão e assinaturas, deixando uma folga de 10%.
   - Simula compras à vista e parceladas ("Posso comprar um celular de R$ 1.500?").
+- **Moedas: Real, Dólar e Euro.**
+  - Cada pessoa escolhe a moeda em Minha conta, e os valores já registrados podem ser convertidos pela cotação do dia.
+  - "Gastei 50 dólares" é convertido para a moeda da pessoa.
+  - A tela Dinheiro tem um conversor.
+- **Cobrança automática no cartão:** a assinatura é só por cartão de crédito, e o Asaas Checkout recorrente cobra sozinho todo mês.
 - **Plano Família.**
   - Até 5 pessoas, com convite por link de uso único.
   - Lista de compras da família, e agenda e tarefas compartilhadas quando você disser "a gente…" ou "da família".

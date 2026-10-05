@@ -13,7 +13,8 @@ import { addPurchase, bestDay, cancelPurchase, payInvoice, pickCard, recomputeCa
 const normName = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 import type { Action } from "./actions";
 import { addDays, addMonths, cap, dateInMonth, fmtBR, fmtLong, relDay } from "../dates";
-import { brl, METHOD_LABEL, toCents } from "../money";
+import { brl, CURRENCIES, isCurrency, METHOD_LABEL, toCents, withCurrency, type Currency } from "../money";
+import { convert, getRates, rate } from "../fx";
 import { CATEGORIES } from "../categories";
 import { loadCategories, moveByKeywords, slugKey, upsertCategory } from "../data/user-categories";
 
@@ -38,7 +39,7 @@ export type ExecResult = { cards: Card[]; executed: Action[]; createdEventIds: s
 export async function executeActions(db: DB, access: Access, today: string, actions: Action[]): Promise<ExecResult> {
   const userId = access.userId;
   if (!actions.length) return { cards: [], executed: [], createdEventIds: [], skipped: 0 };
-  return db.transaction(async (tx) => {
+  return withCurrency(access.currency, () => db.transaction(async (tx) => {
     const res: ExecResult = { cards: [], executed: [], createdEventIds: [], skipped: 0 };
     for (const a of actions) {
       const card = await runOne(tx as unknown as DB, access, today, a, res.createdEventIds);
@@ -48,7 +49,19 @@ export async function executeActions(db: DB, access: Access, today: string, acti
     }
     if (res.skipped) log.warn("nina.actions_skipped", { userId, skipped: res.skipped });
     return res;
-  });
+  }));
+}
+
+/** Valor dito em outra moeda → converte para a moeda da pessoa pela cotação do dia. */
+async function toUserCents(db: DB, access: Access, today: string, amount: number, currency?: string | null): Promise<{ cents: number; note: string | null }> {
+  const mine = (isCurrency(access.currency) ? access.currency : "BRL") as Currency;
+  const said = isCurrency(currency) ? currency : mine;
+  const cents = toCents(amount);
+  if (said === mine) return { cents, note: null };
+  const r = await getRates(db, today);
+  if (!r) return { cents, note: `⚠️ Sem cotação agora: registrei ${brl(cents, mine)} (o valor que você falou)` };
+  const conv = convert(cents, said, mine, r);
+  return { cents: conv, note: `💱 ${brl(cents, said)} ≈ ${brl(conv, mine)} (1 ${CURRENCIES[said].symbol} = ${brl(Math.round(rate(said, mine, r) * 100), mine)})` };
 }
 
 /** Retorna o cartão de confirmação, `undefined` (executou sem cartão) ou `null` (ignorada). */
@@ -125,23 +138,23 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       return { icon: "🗑️", title: r.text, lines: ["Lembrete cancelado"] };
     }
     case "add_transaction": {
-      const cents = toCents(a.amount);
+      const { cents, note: fxNote } = await toUserCents(db, access, today, a.amount, a.currency);
       const date = a.date ?? today;
       const uc = await cats();
       const catKey = uc.resolve(a.category, a.description, a.kind === "income" ? "INCOME" : "EXPENSE");
       const cat = uc.get(catKey);
       if (a.kind === "income") {
         await db.insert(income).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: catKey, date });
-        return { icon: "💵", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name} · Receita`] };
+        return { icon: "💵", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name} · Receita`, ...(fxNote ? [fxNote] : [])] };
       }
       if (a.method === "cartao") {
         const cards = await userCards(db, userId);
-        if (cards.length) return runOne(db, access, today, { type: "add_card_purchase", card: null, description: a.description, amount: a.amount, installmentAmount: undefined, installments: 1, date: a.date, category: a.category }, created);
+        if (cards.length) return runOne(db, access, today, { type: "add_card_purchase", card: null, description: a.description, amount: a.amount, installmentAmount: undefined, installments: 1, date: a.date, category: a.category, currency: a.currency }, created);
       }
       const method = a.method ? (a.method.toUpperCase() as "CARTAO" | "PIX" | "DINHEIRO" | "DEBITO" | "BOLETO") : null;
       const sharedFin = !!(a.shared && hh && access.household?.shareFinance);
       await db.insert(expenses).values({ userId, amountCents: cents, description: cap(a.description), categoryKey: catKey, method, date, status: "PAID", paidAt: new Date(), householdId: sharedFin ? hh : null });
-      return { icon: "💰", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name}${method ? ` · ${METHOD_LABEL[method]}` : ""} · Despesa`, ...famTag(sharedFin)] };
+      return { icon: "💰", title: `${brl(cents)} · ${cap(a.description)}`, lines: [`${cat.emoji} ${cat.name}${method ? ` · ${METHOD_LABEL[method]}` : ""} · Despesa`, ...(fxNote ? [fxNote] : []), ...famTag(sharedFin)] };
     }
     case "add_bill": {
       const amountCents = a.amount ? toCents(a.amount) : null;
@@ -165,7 +178,7 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       return { icon: "✅", title: `${b.description} paga`, lines: [amountCents ? `${brl(amountCents)} registrado nas despesas` : "Marcada como paga"] };
     }
     case "add_fixed": {
-      const amountCents = toCents(a.amount);
+      const amountCents = (await toUserCents(db, access, today, a.amount, a.currency)).cents;
       const kind = a.kind === "income" ? "INCOME" : a.auto ? "EXPENSE" : "BILL";
       const uc = await cats();
       const catKey = uc.resolve(a.category, a.name, a.kind === "income" ? "INCOME" : "EXPENSE");
@@ -279,13 +292,15 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       const card = pickCard(await userCards(db, userId), a.card);
       if (!card) return null;
       const n = a.installments;
-      const totalCents = a.amount ? toCents(a.amount) : toCents(a.installmentAmount!) * n;
+      const fx = await toUserCents(db, access, today, a.amount ?? a.installmentAmount! * n, a.currency);
+      const totalCents = fx.cents;
       const catKey = (await cats()).resolve(a.category, a.description, "EXPENSE");
       const r = await addPurchase(db, userId, card, { description: cap(a.description), totalCents, installments: n, purchaseDate: a.date ?? today, categoryKey: catKey }, today);
       const cat = (await cats()).get(catKey);
       return { icon: "💳", title: `${cap(a.description)} · ${brl(totalCents)}`, lines: [
         `${card.name} · ${n > 1 ? `${n}x de ${brl(r.parts[n - 1])}` : "à vista"} · ${cat.emoji} ${cat.name}`,
         n > 1 ? `1ª na fatura de ${fmtBR(r.firstDue)} · última em ${fmtBR(r.lastDue)}` : `Entra na fatura de ${fmtBR(r.firstDue)}`,
+        ...(fx.note ? [fx.note] : []),
       ] };
     }
     case "pay_invoice": {
