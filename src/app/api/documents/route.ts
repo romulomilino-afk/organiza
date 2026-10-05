@@ -10,6 +10,7 @@ import { hasFeature } from "@/lib/plans";
 import { isISODate, todayIn, addMonths, cap } from "@/lib/dates";
 import { MAX_FILE_BYTES, USER_QUOTA_BYTES, putFile, sniffMime } from "@/lib/storage";
 import { log } from "@/lib/logger";
+import { APP_VERSION } from "@/lib/version";
 
 const meta = z.object({
   name: z.string().trim().min(1, "Dê um nome ao documento").max(120),
@@ -48,7 +49,7 @@ export const POST = route("documents.upload", async (req: Request) => {
       const detail = `${err.code ? err.code + " " : ""}${err.name}: ${err.cause?.message ?? err.message}`
         .replace(/postgres(ql)?:\/\/\S+/gi, "[banco]").replace(/\s+/g, " ").slice(0, 160);
       log.error("documents.storage_failed", { userId: user.id, detail });
-      throw new AppError(503, `Não consegui guardar o arquivo agora. (detalhe: ${detail})`, "storage");
+      throw new AppError(503, `Não consegui guardar o arquivo agora. (detalhe ${APP_VERSION}: ${detail})`, "storage");
     }
     sizeBytes = file.size;
     fileName = file.name.replace(/[^\w.\- À-ú]/g, "_").slice(0, 120);

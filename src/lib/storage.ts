@@ -57,12 +57,13 @@ export function decrypt(blob: Buffer): Buffer {
 type Driver = "s3" | "netlify" | "db" | "local";
 const driver = (): Driver => {
   const d = process.env.STORAGE_DRIVER;
-  const onNetlify = process.env.ORGANIZA_ON_NETLIFY === "1";
-  // "local" não funciona no Netlify (disco só leitura) — mesmo que tenha vindo do .env importado
-  if (d === "local" && onNetlify) return "db";
-  if (d === "s3" || d === "netlify" || d === "db" || d === "local") return d;
+  // servidor sem disco gravável (Netlify, AWS Lambda) ou produção: pasta local nunca é usada
+  const serverless = process.env.ORGANIZA_ON_NETLIFY === "1" || !!process.env.LAMBDA_TASK_ROOT || !!process.env.AWS_LAMBDA_FUNCTION_NAME
+    || process.env.NODE_ENV === "production" || process.cwd().startsWith("/var/task");
+  if (d === "s3" || d === "netlify" || d === "db") return d;
+  if (d === "local" && !serverless) return "local";
   // no Netlify (e em qualquer servidor sem disco gravável) o padrão é guardar no banco
-  return process.env.ORGANIZA_ON_NETLIFY === "1" || process.env.NODE_ENV === "production" ? "db" : "local";
+  return serverless ? "db" : "local";
 };
 type Db = import("@/db").DB;
 let dbOverride: Db | null = null;
@@ -110,9 +111,14 @@ export async function putFile(userId: string, data: Buffer): Promise<string> {
   } else if (driver() === "netlify") {
     await (await blobs()).set(key, new Uint8Array(blob).buffer as ArrayBuffer);
   } else {
-    const file = path.join(localDir(), key);
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, blob, { mode: 0o600 });
+    try {
+      const file = path.join(localDir(), key);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, blob, { mode: 0o600 });
+    } catch {
+      // disco sem permissão de escrita: guarda no banco
+      await (await sqlDb()).insert(await dbTable()).values({ key, userId, data: blob });
+    }
   }
   return key;
 }
@@ -135,7 +141,15 @@ export async function getFile(key: string): Promise<Buffer> {
     if (!ab) throw new Error("arquivo não encontrado");
     return decrypt(Buffer.from(ab));
   }
-  return decrypt(await readFile(path.join(localDir(), key)));
+  try {
+    return decrypt(await readFile(path.join(localDir(), key)));
+  } catch {
+    const t = await dbTable();
+    const { eq } = await import("drizzle-orm");
+    const [row] = await (await sqlDb()).select({ data: t.data }).from(t).where(eq(t.key, key)).limit(1);
+    if (!row) throw new Error("arquivo não encontrado");
+    return decrypt(Buffer.from(row.data));
+  }
 }
 
 export async function deleteFile(key: string): Promise<void> {

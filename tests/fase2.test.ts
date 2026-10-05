@@ -293,3 +293,23 @@ test("arquivos no banco: se a tabela não existir (migração não rodou), cria 
     if (prev === undefined) delete process.env.STORAGE_DRIVER; else process.env.STORAGE_DRIVER = prev;
   }
 });
+
+test("arquivos: com STORAGE_DRIVER=local mas sem disco gravável, guarda no banco", async () => {
+  const { setStorageDb } = await import("../src/lib/storage");
+  const u = await mk("semdisco@x.com", "PREMIUM");
+  const prevD = process.env.STORAGE_DRIVER, prevDir = process.env.STORAGE_DIR;
+  process.env.STORAGE_DRIVER = "local";
+  process.env.STORAGE_DIR = "/etc/hostname/storage"; // dentro de um arquivo: não dá para criar pasta
+  setStorageDb(db);
+  try {
+    const pdf = Buffer.from("%PDF-1.4 cnh");
+    const key = await putFile(u.id, pdf);
+    const [row] = await db.select().from(schema.documentFiles).where(eq(schema.documentFiles.key, key));
+    assert.ok(row, "foi para o banco");
+    assert.deepEqual(await getFile(key), pdf);
+  } finally {
+    setStorageDb(null);
+    if (prevD === undefined) delete process.env.STORAGE_DRIVER; else process.env.STORAGE_DRIVER = prevD;
+    if (prevDir === undefined) delete process.env.STORAGE_DIR; else process.env.STORAGE_DIR = prevDir;
+  }
+});

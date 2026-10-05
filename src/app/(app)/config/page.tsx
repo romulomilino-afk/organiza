@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { APP_VERSION } from "@/lib/version";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { userPreferences } from "@/db/schema";
@@ -87,6 +88,7 @@ export default async function ConfigPage() {
         )}
 
         <form action={logout}><button className="btn btn-ghost w-full">Sair</button></form>
+        <p className="text-center text-[12px] text-ink-3">Organiza · versão {APP_VERSION}</p>
       </div>
     </>
   );
