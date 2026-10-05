@@ -2,8 +2,8 @@
  * Armazenamento de arquivos dos usuários (notas fiscais, contratos, documentos…).
  *
  * - Todo arquivo é criptografado (AES-256-GCM) ANTES de sair do servidor: nem o disco nem o bucket veem o conteúdo.
- * - Drivers: "local" (pasta ./storage, desenvolvimento), "netlify" (Netlify Blobs, automático no Netlify, sem configurar nada)
- *   e "s3" (AWS S3, Cloudflare R2, MinIO…).
+ * - Drivers: "local" (pasta ./storage, desenvolvimento), "db" (o próprio Postgres — padrão no Netlify, sem configurar nada),
+ *   "netlify" (Netlify Blobs) e "s3" (AWS S3, Cloudflare R2, MinIO…).
  * - O tipo do arquivo é conferido pelos primeiros bytes, não pela extensão.
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
@@ -54,12 +54,23 @@ export function decrypt(blob: Buffer): Buffer {
   return Buffer.concat([d.update(body), d.final()]);
 }
 
-type Driver = "s3" | "netlify" | "local";
+type Driver = "s3" | "netlify" | "db" | "local";
 const driver = (): Driver => {
   const d = process.env.STORAGE_DRIVER;
-  if (d === "s3" || d === "netlify" || d === "local") return d;
-  return process.env.ORGANIZA_ON_NETLIFY === "1" || process.env.NETLIFY_BLOBS_CONTEXT ? "netlify" : "local";
+  if (d === "s3" || d === "netlify" || d === "db" || d === "local") return d;
+  // no Netlify (e em qualquer servidor sem disco gravável) o padrão é guardar no banco
+  return process.env.ORGANIZA_ON_NETLIFY === "1" || process.env.NODE_ENV === "production" ? "db" : "local";
 };
+type Db = import("@/db").DB;
+let dbOverride: Db | null = null;
+/** Testes: usar outro banco no driver "db". */
+export function setStorageDb(db: Db | null) { dbOverride = db; }
+async function sqlDb(): Promise<Db> {
+  if (dbOverride) return dbOverride;
+  const { getDb } = await import("@/db");
+  return getDb();
+}
+async function dbTable() { return (await import("@/db/schema")).documentFiles; }
 async function blobs() {
   const { getStore } = await import("@netlify/blobs");
   return getStore({ name: "organiza-files", consistency: "strong" });
@@ -82,6 +93,8 @@ export async function putFile(userId: string, data: Buffer): Promise<string> {
   const blob = encrypt(data);
   if (driver() === "s3") {
     await s3c().send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key, Body: blob, ContentType: "application/octet-stream" }));
+  } else if (driver() === "db") {
+    await (await sqlDb()).insert(await dbTable()).values({ key, userId, data: blob });
   } else if (driver() === "netlify") {
     await (await blobs()).set(key, new Uint8Array(blob).buffer as ArrayBuffer);
   } else {
@@ -98,6 +111,13 @@ export async function getFile(key: string): Promise<Buffer> {
     const r = await s3c().send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
     return decrypt(Buffer.from(await r.Body!.transformToByteArray()));
   }
+  if (driver() === "db") {
+    const t = await dbTable();
+    const { eq } = await import("drizzle-orm");
+    const [row] = await (await sqlDb()).select({ data: t.data }).from(t).where(eq(t.key, key)).limit(1);
+    if (!row) throw new Error("arquivo não encontrado");
+    return decrypt(Buffer.from(row.data));
+  }
   if (driver() === "netlify") {
     const ab = await (await blobs()).get(key, { type: "arrayBuffer" });
     if (!ab) throw new Error("arquivo não encontrado");
@@ -109,6 +129,7 @@ export async function getFile(key: string): Promise<Buffer> {
 export async function deleteFile(key: string): Promise<void> {
   if (!/^[\w-]+\/[\w-]+$/.test(key)) return;
   if (driver() === "s3") await s3c().send(new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
+  else if (driver() === "db") { const t = await dbTable(); const { eq } = await import("drizzle-orm"); await (await sqlDb()).delete(t).where(eq(t.key, key)); }
   else if (driver() === "netlify") await (await blobs()).delete(key);
   else await rm(path.join(localDir(), key), { force: true });
 }

@@ -255,3 +255,23 @@ test("WhatsApp: vincular número, conversar, botão de sugestão e idempotência
   await handleInbound(db, payload("w6", "5511988887777", "Gastei 10 reais"), wa);
   assert.match(sent.at(-1)!.body, /plano Premium/);
 });
+
+test("arquivos no banco (padrão no Netlify): guarda criptografado, lê de volta e apaga", async () => {
+  const { setStorageDb, deleteFile } = await import("../src/lib/storage");
+  const u = await mk("arquivo-db@x.com", "PREMIUM");
+  const prev = process.env.STORAGE_DRIVER;
+  process.env.STORAGE_DRIVER = "db";
+  setStorageDb(db);
+  try {
+    const pdf = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(3 * 1024 * 1024, 7)]); // 3 MB
+    const key = await putFile(u.id, pdf);
+    const [row] = await db.select().from(schema.documentFiles).where(eq(schema.documentFiles.key, key));
+    assert.ok(row && !row.data.includes(Buffer.from("%PDF")), "no banco fica só o conteúdo criptografado");
+    assert.deepEqual(await getFile(key), pdf);
+    await deleteFile(key);
+    assert.equal((await db.select().from(schema.documentFiles).where(eq(schema.documentFiles.key, key))).length, 0);
+  } finally {
+    setStorageDb(null);
+    if (prev === undefined) delete process.env.STORAGE_DRIVER; else process.env.STORAGE_DRIVER = prev;
+  }
+});

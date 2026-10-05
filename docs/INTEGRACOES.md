@@ -26,7 +26,7 @@ Guia de configuração de cada serviço externo do Organiza. Nenhum deles é obr
 ## 2. Arquivos (Documentos)
 
 - **Em desenvolvimento,** não precisa configurar nada. Os arquivos vão para `./storage`, criptografados com uma chave derivada do `AUTH_SECRET`.
-- **No Netlify,** também não precisa configurar nada. Os arquivos vão sozinhos para o **Netlify Blobs**, sempre criptografados. Sem `FILES_ENCRYPTION_KEY`, a chave vem do `AUTH_SECRET`. **Nesse caso, não troque o `AUTH_SECRET`**, ou os arquivos já guardados não abrem mais.
+- **No Netlify** (e em produção sem S3), também não precisa configurar nada. Os arquivos ficam no próprio banco Postgres, na tabela `document_files`, sempre criptografados. O limite é de 4 MB por arquivo. No Neon grátis cabem centenas de documentos. Sem `FILES_ENCRYPTION_KEY`, a chave vem do `AUTH_SECRET`. **Nesse caso, não troque o `AUTH_SECRET`**, ou os arquivos já guardados não abrem mais.
 - **Em outros servidores:**
   1. Defina `FILES_ENCRYPTION_KEY` com a chave que `npm run secrets` gera. **Guarde essa chave em lugar seguro. Se ela se perder, os arquivos não podem mais ser abertos.**
   2. Para usar a nuvem, defina `STORAGE_DRIVER=s3` e preencha `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID` e `S3_SECRET_ACCESS_KEY`.

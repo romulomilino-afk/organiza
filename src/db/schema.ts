@@ -7,6 +7,7 @@
  *   horários como texto "HH:MM" no fuso do usuário.
  */
 import {
+  customType,
   pgTable, pgEnum, text, integer, boolean, timestamp, date, jsonb, primaryKey, index, uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
@@ -272,6 +273,18 @@ export const documents = pgTable("documents", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("documents_user_idx").on(t.userId, t.expiresAt)]);
+
+/** Bytes dos arquivos (já criptografados) quando o armazenamento é o próprio banco — padrão no Netlify. */
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => "bytea",
+  fromDriver: (v) => Buffer.from(v as Uint8Array),
+});
+export const documentFiles = pgTable("document_files", {
+  key: text("key").primaryKey(),
+  userId: userId(),
+  data: bytea("data").notNull(),
+  createdAt: createdAt(),
+});
 
 export const warranties = pgTable("warranties", {
   id: id(),

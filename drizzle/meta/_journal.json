@@ -43,6 +43,13 @@
       "when": 1791211760851,
       "tag": "0005_pendencias",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791214884659,
+      "tag": "0006_arquivos",
+      "breakpoints": true
     }
   ]
 }
