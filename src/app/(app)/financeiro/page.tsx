@@ -13,7 +13,7 @@ import { CURRENCIES, isCurrency, type Currency } from "@/lib/money";
 import { fmtBR } from "@/lib/dates";
 import { explainSimulation, monthBudget, simulate } from "@/lib/budget";
 import { addDays } from "@/lib/dates";
-import { hasFeature, type PlanId } from "@/lib/plans";
+import { hasFeature, PLANS, type PlanId } from "@/lib/plans";
 import { activeSubscriptions, ensureRecurringBills, fixedItems, householdFinance, monthFinance, pendingBills } from "@/lib/data/queries";
 import { addFixed, cancelFixed } from "@/actions/fixed";
 import { deleteExpense, deleteIncome, payBill } from "@/actions/items";
@@ -28,7 +28,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
         <PageHeader title="Dinheiro" subtitle="Receitas, despesas e contas" />
         <div className="card flex flex-col gap-3">
           <p className="text-[17px]">Registre seus gastos só falando: “Gastei 45 reais no almoço”.</p>
-          <p className="text-ink-2">O financeiro faz parte do plano Premium (R$ 14,90/mês), junto com memória, áudio e lembretes inteligentes.</p>
+          <p className="text-ink-2">O financeiro faz parte do plano Premium ({brl(PLANS.PREMIUM.priceCents, "BRL")}/mês), junto com memória, áudio e lembretes inteligentes.</p>
           <Link href="/config" className="btn w-fit">Ver planos</Link>
         </div>
       </>

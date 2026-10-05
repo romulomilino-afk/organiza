@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { requirePageAccess } from "@/lib/session";
 import { MESES, fmtBR, fmtShort, todayIn } from "@/lib/dates";
 import { brl, CURRENCIES, currentCurrency } from "@/lib/money";
-import { hasFeature } from "@/lib/plans";
+import { hasFeature, PLANS } from "@/lib/plans";
 import { cardsOverview, firstDueDate, type Invoice } from "@/lib/cards";
 import { loadCategories } from "@/lib/data/user-categories";
 import { addCardForm, addPurchaseForm, cancelPurchaseAction, deleteCardAction, payInvoiceAction } from "@/actions/cards";
@@ -26,7 +26,7 @@ export default async function CartoesPage() {
         <PageHeader title="Dinheiro" subtitle="Cartões de crédito" />
         <div className="card flex flex-col gap-3">
           <p className="text-[17px]">Controle faturas e parcelas só falando: “comprei uma TV de 3.000 em 10x no Nubank”.</p>
-          <p className="text-ink-2">Os cartões fazem parte do plano Premium (R$ 14,90/mês).</p>
+          <p className="text-ink-2">Os cartões fazem parte do plano Premium ({brl(PLANS.PREMIUM.priceCents, "BRL")}/mês).</p>
           <Link href="/planos" className="btn w-fit">Ver planos</Link>
         </div>
       </>

@@ -83,7 +83,7 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
   - **Garantias**: calculadas a partir da nota fiscal ou pelo que você disser à Nina.
   - **Assinaturas**: com os totais mensal e anual.
 - **Pagamentos com Asaas.**
-  - Premium por R$ 14,90 e Família por R$ 24,90, com Pix, boleto ou cartão.
+  - Premium por R$ 19,90 e Família por R$ 29,90, com cobrança automática no cartão.
   - O webhook ativa o plano, e eventos repetidos são ignorados.
   - Se o pagamento atrasar, há 7 dias de carência antes de voltar ao Grátis.
   - É possível cancelar a qualquer momento, e o acesso continua até o fim do mês pago.

@@ -10,11 +10,11 @@ export const PLANS: Record<PlanId, { name: string; priceCents: number; monthlyIn
     features: ["agenda", "tarefas", "compras", "lembretes"],
   },
   PREMIUM: {
-    name: "Premium", priceCents: 1490, monthlyInteractions: 2000, maxMembers: 1,
+    name: "Premium", priceCents: 1990, monthlyInteractions: 2000, maxMembers: 1,
     features: ["agenda", "tarefas", "compras", "lembretes", "financeiro", "memoria", "documentos", "garantias", "assinaturas", "audio", "whatsapp"],
   },
   FAMILY: {
-    name: "Família", priceCents: 2490, monthlyInteractions: 5000, maxMembers: 5,
+    name: "Família", priceCents: 2990, monthlyInteractions: 5000, maxMembers: 5,
     features: ["agenda", "tarefas", "compras", "lembretes", "financeiro", "memoria", "documentos", "garantias", "assinaturas", "audio", "whatsapp", "familia"],
   },
 };
