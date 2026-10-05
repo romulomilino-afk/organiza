@@ -57,6 +57,9 @@ export function decrypt(blob: Buffer): Buffer {
 type Driver = "s3" | "netlify" | "db" | "local";
 const driver = (): Driver => {
   const d = process.env.STORAGE_DRIVER;
+  const onNetlify = process.env.ORGANIZA_ON_NETLIFY === "1";
+  // "local" não funciona no Netlify (disco só leitura) — mesmo que tenha vindo do .env importado
+  if (d === "local" && onNetlify) return "db";
   if (d === "s3" || d === "netlify" || d === "db" || d === "local") return d;
   // no Netlify (e em qualquer servidor sem disco gravável) o padrão é guardar no banco
   return process.env.ORGANIZA_ON_NETLIFY === "1" || process.env.NODE_ENV === "production" ? "db" : "local";
