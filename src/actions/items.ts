@@ -16,6 +16,7 @@ import { financeScope } from "@/lib/data/queries";
 import { addDays, cap, isISODate, todayIn } from "@/lib/dates";
 import { defaultListId, ensureUserSetup, householdListId } from "@/lib/data/user-setup";
 import { signOut } from "@/auth";
+import { onBought } from "@/lib/watch";
 
 const id = z.string().min(1).max(64);
 const refresh = () => { revalidatePath("/", "layout"); };
@@ -54,6 +55,7 @@ export async function toggleShopping(itemId: string) {
   const [i] = await db.select().from(shoppingItems).where(and(eq(shoppingItems.id, id.parse(itemId)), visible(shoppingItems, access))).limit(1);
   if (!i) return;
   await db.update(shoppingItems).set({ checked: !i.checked, checkedAt: i.checked ? null : new Date() }).where(eq(shoppingItems.id, i.id));
+  if (!i.checked) await onBought(db, access, [i.name], todayIn(u.timezone));
   refresh();
 }
 

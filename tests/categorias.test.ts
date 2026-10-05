@@ -41,7 +41,7 @@ test("criar categoria por conversa move os lançamentos antigos e vale para os n
   const u = await mk("cat@x.com");
   await handleMessage(db, u, "Gastei 40 reais na barbearia");
   await handleMessage(db, u, "Gastei 120 reais na academia");
-  assert.deepEqual(await expensesOf(u.id), { Barbearia: "outros", Academia: "outros" });
+  assert.deepEqual(await expensesOf(u.id), { Barbearia: "outros", Academia: "saude" });
 
   const r = await handleMessage(db, u, "barbearia vai na categoria Beleza");
   assert.match(r.assistant.content, /Beleza/);

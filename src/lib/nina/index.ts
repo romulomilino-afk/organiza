@@ -16,6 +16,7 @@ import { ACTION_FEATURE, hasFeature, PLANS, type PlanId } from "../plans";
 import { ensureRecurringBills } from "../data/queries";
 import { loadCategories } from "../data/user-categories";
 import { cardsOverview } from "../cards";
+import { monthBudget } from "../budget";
 import { activeConversationId } from "../data/user-setup";
 import { monthKey, todayIn } from "../dates";
 import { AppError } from "../errors";
@@ -93,7 +94,8 @@ export async function handleMessage(db: DB, user: User, text: string, source: "T
     const lastU = [...history].reverse().find((m) => m.role === "USER");
     const cats = await loadCategories(db, user.id);
     const cards = (await cardsOverview(db, user.id, today)).map((c) => ({ ...c.card, usedCents: c.usedCents }));
-    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards }));
+    const budget = /\b(posso|consigo|da pra|dá pra|quanto).{0,30}(gastar|comprar)/i.test(text) && hasFeature(plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
+    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards, budget, financeEnabled: hasFeature(plan, "financeiro") }));
   }
 
   const { allowed, note } = gateByPlan(plan, out.actions);

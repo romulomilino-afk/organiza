@@ -8,6 +8,7 @@ import { addCategoryForm, deleteCategory } from "@/actions/categories";
 import { payInvoiceAction } from "@/actions/cards";
 import { unpaidInvoicesDue } from "@/lib/cards";
 import { FinanceTabs } from "@/components/FinanceTabs";
+import { explainSimulation, monthBudget, simulate } from "@/lib/budget";
 import { addDays } from "@/lib/dates";
 import { hasFeature, type PlanId } from "@/lib/plans";
 import { activeSubscriptions, ensureRecurringBills, fixedItems, householdFinance, monthFinance, pendingBills } from "@/lib/data/queries";
@@ -15,7 +16,8 @@ import { addFixed, cancelFixed } from "@/actions/fixed";
 import { deleteExpense, deleteIncome, payBill } from "@/actions/items";
 import { Empty, PageHeader, SmallButton, XButton } from "@/components/ui";
 
-export default async function FinanceiroPage() {
+export default async function FinanceiroPage({ searchParams }: { searchParams: Promise<{ valor?: string; parcelas?: string }> }) {
+  const sp = await searchParams;
   const { user, access } = await requirePageAccess();
   if (!hasFeature(access.plan, "financeiro")) {
     return (
@@ -34,6 +36,10 @@ export default async function FinanceiroPage() {
   await ensureRecurringBills(db, user.id, today, user.timezone);
   const [fin, bills, subs, fam, fixos, ucats] = await Promise.all([monthFinance(db, user.id, today), pendingBills(db, access), activeSubscriptions(db, user.id), householdFinance(db, access, today), fixedItems(db, user.id), loadCategories(db, user.id)]);
   const faturas = await unpaidInvoicesDue(db, user.id, today, addDays(today, 30));
+  const budget = await monthBudget(db, user.id, today, user.timezone);
+  const simValor = sp.valor ? Number(String(sp.valor).replace(/\./g, "").replace(",", ".")) : NaN;
+  const simN = Math.min(48, Math.max(1, Number(sp.parcelas ?? 1) || 1));
+  const sim = simValor > 0 && simValor < 10_000_000 ? { text: explainSimulation(budget, Math.round(simValor * 100), simN), r: simulate(budget, Math.round(simValor * 100), simN) } : null;
   const category = (k: string | null | undefined) => ucats.get(k);
   const myCats = ucats.list.filter((c) => c.custom || c.keywords.length);
 
@@ -64,6 +70,44 @@ export default async function FinanceiroPage() {
               <span>💳 Parcelas de cartão que vencem este mês</span><b className="num">{brl(fin.cardCents)}</b>
             </Link>
           )}
+        </div>
+
+        <div className="card" id="posso-gastar">
+          <div className="eyebrow mb-1">💡 Posso gastar?</div>
+          {budget.hasIncome ? (
+            <>
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <div className={`num font-display text-[30px] font-semibold leading-tight ${budget.marginCents < 0 ? "text-bad" : "text-good"}`}>{budget.marginCents < 0 ? brl(budget.marginCents) : brl(budget.freeCents)}</div>
+                  <div className="text-[13px] text-ink-3">{budget.marginCents < 0 ? "no vermelho este mês" : `livres este mês · ~${brl(budget.perDayCents)}/dia nos próximos ${budget.daysLeft} dias`}</div>
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[13px] font-semibold text-accent">Como calculei</summary>
+                <div className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-sm">
+                  <span>Já recebido</span><b className="num text-good">{brl(budget.receivedCents)}</b>
+                  {budget.expectedIncomeCents > 0 && <><span>Receitas fixas que ainda vão cair</span><b className="num text-good">{brl(budget.expectedIncomeCents)}</b></>}
+                  <span>Já gasto (inclui parcelas do mês)</span><b className="num">− {brl(budget.spentCents)}</b>
+                  {budget.pendingBillsCents > 0 && <><span>Contas a pagar</span><b className="num">− {brl(budget.pendingBillsCents)}</b></>}
+                  {budget.fixedToComeCents > 0 && <><span>Despesas fixas que ainda vão sair</span><b className="num">− {brl(budget.fixedToComeCents)}</b></>}
+                  {budget.subscriptionsCents > 0 && <><span>Assinaturas</span><b className="num">− {brl(budget.subscriptionsCents)}</b></>}
+                  <span className="border-t border-line pt-1 font-semibold">Margem do mês</span><b className="num border-t border-line pt-1">{brl(budget.marginCents)}</b>
+                  <span className="text-ink-3">Folga para imprevistos (10% da renda)</span><b className="num text-ink-3">− {brl(budget.cushionCents)}</b>
+                  <span className="text-ink-3">Mês que vem (previsto)</span><b className="num text-ink-3">{brl(budget.next.marginCents)}</b>
+                </div>
+              </details>
+              <form className="mt-3 grid grid-cols-[1fr_6.5rem] gap-2 border-t border-line pt-3" action="/financeiro#posso-gastar">
+                <input name="valor" required inputMode="decimal" pattern="[0-9.,]+" defaultValue={sp.valor ?? ""} placeholder="Quero comprar algo de R$…" className="field" aria-label="Valor da compra" />
+                <select name="parcelas" defaultValue={String(simN)} className="field" aria-label="Parcelas">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? "À vista" : `${n}x`}</option>)}
+                </select>
+                <button className="btn col-span-2">Posso comprar?</button>
+              </form>
+              {sim && (
+                <p className={`mt-3 rounded-xl px-3 py-2 text-[15px] ${sim.r.verdict === "ok" ? "bg-accent-soft" : sim.r.verdict === "apertado" ? "bg-warn-soft" : "bg-bad-soft"}`}>{sim.text}</p>
+              )}
+            </>
+          ) : <Empty>Me conta sua renda e eu calculo quanto você pode gastar sem se apertar. Diga: “meu salário de 4.000 cai todo dia 5”.</Empty>}
         </div>
 
         <div className="card">

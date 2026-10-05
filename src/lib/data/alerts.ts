@@ -3,7 +3,7 @@
  * Poucos e relevantes: no máximo 4 na tela inicial, ordenados por importância.
  * Cada alerta tem uma chave estável para poder ser dispensado (tabela notifications).
  */
-import type { Document, Event, Expense, Reminder, ShoppingItem, Task, Warranty } from "@/db/schema";
+import type { Deadline, Document, Event, Expense, Reminder, ShoppingItem, Task, Warranty } from "@/db/schema";
 import { addDays, diffDays, fmtBR, relDay, todayIn } from "../dates";
 import { brl } from "../money";
 import { occursOn } from "../recurrence";
@@ -15,6 +15,7 @@ export function computeAlerts(input: {
   events: Event[]; bills: Expense[]; tasks: Task[]; shopping: ShoppingItem[]; reminders: Reminder[];
   docs?: Document[]; warranties?: Warranty[];
   invoices?: { cardId: string; cardName: string; dueDate: string; totalCents: number }[];
+  deadlines?: Deadline[];
 }): Alert[] {
   const { today, tz } = input;
   const out: Alert[] = [];
@@ -76,6 +77,16 @@ export function computeAlerts(input: {
     const n = diffDays(today, w.expiresAt);
     if (n >= 0 && n <= 30) out.push({ key: `war:${w.id}`, kind: "warranty_expiring", icon: "🧾", level: "warn", weight: 2,
       text: `A garantia do ${w.item.toLowerCase()} vence ${n === 0 ? "hoje" : `em ${n} dias`} (${fmtBR(w.expiresAt)}).` });
+  }
+
+  for (const d of input.deadlines ?? []) {
+    const n = diffDays(today, d.dueDate);
+    if (n > d.remindDaysBefore) continue;
+    // avisa em marcos (início da janela, 7 dias, véspera, no dia, atrasado) — cada marco uma vez só
+    const bucket = n < 0 ? "late" : n === 0 ? "0" : n === 1 ? "1" : n <= 7 ? "7" : "start";
+    const when = n < 0 ? `venceu em ${fmtBR(d.dueDate)}` : n === 0 ? "vence hoje" : n === 1 ? "vence amanhã" : `vence em ${n} dias (${fmtBR(d.dueDate)})`;
+    out.push({ key: `dl:${d.id}:${d.dueDate}:${bucket}`, kind: n < 0 ? "deadline_late" : "deadline_soon", icon: "📌",
+      level: n <= 0 ? "bad" : n <= 7 ? "warn" : "info", weight: n <= 0 ? 6 : n <= 7 ? 4 : 2, text: `${d.name} ${when}.` });
   }
 
   return out.sort((a, b) => b.weight - a.weight);

@@ -10,6 +10,9 @@ import { events, householdMembers, users } from "@/db/schema";
 import { visible, type Access } from "../access";
 import { loadCategories } from "../data/user-categories";
 import { cardsOverview } from "../cards";
+import { activeRoutines, openDeadlines } from "../watch";
+import { monthBudget } from "../budget";
+import { hasFeature } from "../plans";
 
 /**
  * Tudo que a Nina precisa saber para interpretar a mensagem — só do próprio usuário.
@@ -21,7 +24,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     const d = addDays(today, i);
     calendario.push(`${d} = ${DIAS[weekday(d)]}${i === 0 ? " (HOJE)" : i === 1 ? " (amanhã)" : ""}`);
   }
-  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats, cards] = await Promise.all([
+  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats, cards, dls, routines] = await Promise.all([
     occurrences(db, access, addDays(today, -1), addDays(today, 45)),
     db.select().from(events).where(and(visible(events, access), eq(events.cancelled, false))).limit(300),
     openTasks(db, access),
@@ -34,7 +37,11 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     fixedItems(db, user.id),
     loadCategories(db, user.id),
     cardsOverview(db, user.id, today),
+    openDeadlines(db, user.id),
+    activeRoutines(db, access),
   ]);
+  const budget = hasFeature(access.plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
+  const r2 = (c: number) => Math.round(c) / 100;
   const catOut = (c: { key: string; name: string; custom: boolean; keywords: string[] }) =>
     ({ key: c.key, name: c.name, ...(c.custom ? { criada_pelo_usuario: true } : {}), ...(c.keywords.length ? { palavras: c.keywords } : {}) });
 
@@ -65,6 +72,15 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     lista_de_compras: shop.map((i) => i.name),
     lembretes: rems.slice(0, 40).map((r) => ({ id: r.id, text: r.text, date: r.date, time: r.time })),
     categorias: { despesa: cats.expense().map(catOut), receita: cats.income().map(catOut) },
+    orcamento: budget ? {
+      receita_do_mes: r2(budget.incomeCents), ja_recebido: r2(budget.receivedCents), receita_fixa_ainda_vai_cair: r2(budget.expectedIncomeCents),
+      ja_gasto_inclui_parcelas: r2(budget.spentCents), contas_a_pagar_no_mes: r2(budget.pendingBillsCents), fixos_que_ainda_vao_sair: r2(budget.fixedToComeCents), assinaturas: r2(budget.subscriptionsCents),
+      margem_do_mes: r2(budget.marginCents), folga_para_imprevistos: r2(budget.cushionCents), pode_gastar_sem_apertar: r2(budget.freeCents), por_dia: r2(budget.perDayCents), dias_restantes: budget.daysLeft,
+      proximo_mes: { receita_fixa: r2(budget.next.incomeCents), fixos_e_contas: r2(budget.next.fixedOutCents), parcelas_cartao: r2(budget.next.cardCents), margem_prevista: r2(budget.next.marginCents) },
+      tem_renda_cadastrada: budget.hasIncome,
+    } : null,
+    vencimentos: dls.slice(0, 40).map((d) => ({ id: d.id, name: d.name, vence: d.dueDate, avisar_dias_antes: d.remindDaysBefore, renova_meses: d.renewMonths })),
+    compras_de_rotina: routines.map((r) => ({ item: r.name, a_cada_dias: r.everyDays, proxima: r.nextDate })),
     cartoes: cards.map((c) => ({
       nome: c.card.name, fecha_dia: c.card.closingDay, vence_dia: c.card.dueDay, melhor_dia_de_compra: c.best.day,
       hoje_e_bom_para_comprar: c.best.goodNow, limite: c.card.limitCents != null ? c.card.limitCents / 100 : null, limite_usado: c.usedCents / 100,

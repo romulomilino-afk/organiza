@@ -9,6 +9,7 @@
  */
 import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { unpaidInvoicesDue } from "./cards";
+import { ensureRoutines, openDeadlines } from "./watch";
 import type { DB } from "@/db";
 import { notifications, pushSubscriptions, reminders, userPreferences, users, type User } from "@/db/schema";
 import { computeAlerts, type Alert } from "./data/alerts";
@@ -25,6 +26,7 @@ const WINDOW_FROM: Record<string, string> = {
   shopping_stale: "10:00", reminder: "08:00", document_expiring: "09:00", document_expired: "09:00", warranty_expiring: "10:00",
 };
 const URL_FOR: Record<string, string> = {
+  deadline_soon: "/pendencias", deadline_late: "/pendencias",
   event_tomorrow: "/agenda", event_soon: "/agenda", bill_due: "/financeiro", bill_late: "/financeiro", task_late: "/agenda?tab=tarefas",
   shopping_stale: "/casa", reminder: "/agenda", document_expiring: "/casa?tab=documentos", document_expired: "/casa?tab=documentos", warranty_expiring: "/casa?tab=garantias",
 };
@@ -78,6 +80,7 @@ export async function notifyUser(db: DB, user: User, nowDate = new Date()): Prom
   const today = todayIn(tz, nowDate), now = nowTimeIn(tz, nowDate);
   const access = await getAccess(db, user);
   await ensureRecurringBills(db, user.id, today, tz);
+  await ensureRoutines(db, access, today);
 
   const [occ, rems, bills, tks, shop, exp] = await Promise.all([
     occurrences(db, access, today, addDays(today, 7)),
@@ -88,7 +91,7 @@ export async function notifyUser(db: DB, user: User, nowDate = new Date()): Prom
     expiringItems(db, user.id, addDays(today, 30)),
   ]);
   const uniqueEvents = [...new Map(occ.map((o) => [o.event.id, o.event])).values()];
-  const alerts = computeAlerts({ today, tz, events: uniqueEvents, bills, tasks: tks, shopping: shop, reminders: rems.filter((r) => !r.time), docs: exp.docs, warranties: exp.wars, invoices: await unpaidInvoicesDue(db, user.id, today, addDays(today, 3)) });
+  const alerts = computeAlerts({ today, tz, events: uniqueEvents, bills, tasks: tks, shopping: shop, reminders: rems.filter((r) => !r.time), docs: exp.docs, warranties: exp.wars, invoices: await unpaidInvoicesDue(db, user.id, today, addDays(today, 3)), deadlines: await openDeadlines(db, user.id, addDays(today, 366)) });
   const timedReminders = rems.filter((r) => r.date === today && r.time && !r.sentAt).map((r) => ({ id: r.id, text: r.text, time: r.time! }));
   const eventsToday = occ.filter((o) => o.day === today).map((o) => ({ id: o.event.id, title: o.event.title, time: o.event.time }));
 

@@ -4,7 +4,7 @@ import { Composer } from "./Composer";
 import { NinaReply, Typing } from "./Messages";
 import { useNina } from "./useNina";
 
-const EXAMPLES = ["Gastei 45 reais no almoço", "Estou sem café e leite", "Me lembra de ligar para o João amanhã", "Sexta tenho que levar o carro na oficina às 9h"];
+const EXAMPLES = ["Minha geladeira está fazendo um barulho estranho", "Meu seguro vence em dezembro", "Posso comprar um celular de R$ 1.500?", "Preciso comprar ração quando estiver acabando", "Gastei 45 reais no almoço", "Preciso marcar revisão do carro para semana que vem"];
 
 /** Área principal da tela inicial: microfone, campo e a resposta da Nina logo abaixo. */
 export function HomeNina({ canVoice }: { canVoice: boolean }) {
@@ -13,8 +13,8 @@ export function HomeNina({ canVoice }: { canVoice: boolean }) {
   const showPeek = busy || last;
 
   return (
-    <section className="flex flex-col items-center gap-3.5 pt-7 pb-2">
-      <Composer variant="hero" busy={busy} canVoice={canVoice} onSend={send} onError={setError} placeholder="Ex.: tenho dentista dia 20 às 14h" />
+    <section className="flex flex-col items-center gap-3.5 pt-4 pb-2">
+      <Composer variant="hero" busy={busy} canVoice={canVoice} onSend={send} onError={setError} placeholder="Ex.: meu seguro vence em dezembro" />
       {error && <p role="alert" className="w-full rounded-2xl bg-warn-soft px-4 py-3 text-sm text-warn">{error}</p>}
       {showPeek ? (
         <div className="w-full rounded-[18px] bg-accent-soft px-4 py-3.5 text-[15px]" aria-live="polite">

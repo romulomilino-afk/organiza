@@ -24,7 +24,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cancel_event"), id: idRef }),
   z.object({ type: z.literal("set_event_reminder"), ref: idRef, days: z.coerce.number().int().min(0).max(30).default(1) }),
   // Tarefas
-  z.object({ type: z.literal("add_task"), title: txt(), due: optDay, shared }),
+  z.object({ type: z.literal("add_task"), title: txt(), due: optDay, time: optTime, shared }),
   z.object({ type: z.literal("complete_task"), id: idRef }),
   z.object({ type: z.literal("postpone_task"), id: idRef, due: day }),
   // Lembretes
@@ -51,6 +51,15 @@ export const ActionSchema = z.discriminatedUnion("type", [
     kind: z.enum(["expense", "income"]).nullish().transform((v) => v ?? "expense"),
     keywords: z.array(txt(40)).max(20).nullish().transform((v) => v ?? []) }),
   z.object({ type: z.literal("delete_category"), name: txt(40) }),
+  // Não deixe nada passar
+  z.object({ type: z.literal("add_deadline"), name: txt(80), date: day,
+    remindDaysBefore: z.coerce.number().int().min(0).max(365).nullish().transform((v) => v ?? 30),
+    renewMonths: z.coerce.number().int().min(1).max(120).nullish(),
+    kind: z.enum(["seguro", "documento", "imposto", "contrato", "revisao", "outro"]).nullish().transform((v) => v ?? "outro") }),
+  z.object({ type: z.literal("complete_deadline"), id: idRef }),
+  z.object({ type: z.literal("add_shopping_routine"), item: txt(80), everyDays: z.coerce.number().int().min(1).max(365).nullish().transform((v) => v ?? 30),
+    addNow: z.boolean().nullish().transform((v) => v ?? false) }),
+  z.object({ type: z.literal("cancel_shopping_routine"), item: txt(80) }),
   // Cartões de crédito
   z.object({ type: z.literal("add_card"), name: txt(40), closingDay: z.coerce.number().int().min(1).max(31),
     dueDay: z.coerce.number().int().min(1).max(31), limit: optReais }),

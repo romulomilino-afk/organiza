@@ -147,3 +147,14 @@ test("limite: alterar pela conversa, consultar e editar pela tela (mesmo nome at
   assert.equal(all.length, 1);
   assert.equal(all[0].limitCents, 900000);
 });
+
+test("compra antiga cadastrada hoje: as faturas que já venceram contam como pagas", async () => {
+  const u = await mk("antiga@x.com");
+  await run(u, "2026-10-05", { type: "add_card", name: "Nubank", closingDay: 1, dueDay: 8 });
+  await run(u, "2026-10-05", { type: "add_card_purchase", description: "Notebook", amount: 3000, installments: 10, date: "2026-06-20", category: "compras" });
+  const [ov] = await cardsOverview(db, u.id, "2026-10-05");
+  assert.equal(ov.toPay?.dueDate, "2026-10-08", "só a fatura de outubro está a pagar");
+  const nb = ov.purchases.find((p) => p.description === "Notebook")!;
+  assert.deepEqual([nb.next, nb.remaining], [4, 7]);
+  assert.equal(ov.usedCents, 7 * 30000);
+});

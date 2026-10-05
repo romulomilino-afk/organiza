@@ -5,13 +5,14 @@
 import { and, eq, gt, gte, ilike, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
-  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments,
+  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments, deadlines, shoppingRoutines,
 } from "@/db/schema";
+import { completeDeadline, ensureRoutines, onBought, remindFrom, upsertRoutine } from "../watch";
 import { addPurchase, bestDay, cancelPurchase, payInvoice, pickCard, recomputeCard, userCards } from "../cards";
 
 const normName = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 import type { Action } from "./actions";
-import { addMonths, cap, dateInMonth, fmtBR, fmtLong, relDay } from "../dates";
+import { addDays, addMonths, cap, dateInMonth, fmtBR, fmtLong, relDay } from "../dates";
 import { brl, METHOD_LABEL, toCents } from "../money";
 import { CATEGORIES } from "../categories";
 import { loadCategories, moveByKeywords, slugKey, upsertCategory } from "../data/user-categories";
@@ -89,8 +90,10 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       return { icon: "🔔", title: "Lembrete ativado", lines: [`${a.days === 0 ? "No dia" : `${a.days} dia${a.days > 1 ? "s" : ""} antes`} de ${ev.title.toLowerCase()}`] };
     }
     case "add_task": {
-      const [t] = await db.insert(tasks).values({ userId, title: cap(a.title), dueDate: a.due ?? null, householdId: a.shared && hh ? hh : null }).returning();
-      return { icon: "✅", title: t.title, lines: [t.dueDate ? `Para ${relDay(t.dueDate, today).toLowerCase()}` : "Tarefa sem data", ...famTag(!!t.householdId)] };
+      const [t] = await db.insert(tasks).values({ userId, title: cap(a.title), dueDate: a.due ?? (a.time ? today : null), householdId: a.shared && hh ? hh : null }).returning();
+      // com horário: também cria um lembrete na hora, para avisar no celular
+      if (a.time) await db.insert(reminders).values({ userId, text: t.title, date: t.dueDate!, time: a.time });
+      return { icon: "✅", title: t.title, lines: [t.dueDate ? `Para ${relDay(t.dueDate, today).toLowerCase()}${a.time ? ` às ${a.time}` : ""}` : "Tarefa sem data", ...(a.time ? ["🔔 Te lembro na hora"] : []), ...famTag(!!t.householdId)] };
     }
     case "complete_task": {
       const [t] = await db.update(tasks).set({ status: "DONE", completedAt: new Date() }).where(and(eq(tasks.id, a.id), visible(tasks, access))).returning();
@@ -218,6 +221,29 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       await db.delete(categories).where(and(eq(categories.userId, userId), eq(categories.key, c.key)));
       return { icon: "🗑️", title: `Categoria ${c.name} apagada`, lines: [`Os lançamentos dela foram para ${c.kind === "INCOME" ? "Renda extra" : "Outros"}`] };
     }
+    case "add_deadline": {
+      const [d] = await db.insert(deadlines).values({ userId, name: cap(a.name), dueDate: a.date, remindDaysBefore: a.remindDaysBefore, renewMonths: a.renewMonths ?? null, kind: a.kind }).returning();
+      const from = remindFrom(d);
+      return { icon: "📌", title: d.name, lines: [`Vence ${fmtBR(d.dueDate)}${d.renewMonths ? ` · renova a cada ${d.renewMonths === 12 ? "ano" : `${d.renewMonths} meses`}` : ""}`,
+        d.remindDaysBefore ? `🔔 Aviso a partir de ${fmtBR(from < today ? today : from)} (${d.remindDaysBefore} dias antes)` : "🔔 Aviso no dia"] };
+    }
+    case "complete_deadline": {
+      const d = await completeDeadline(db, userId, a.id);
+      if (!d) return null;
+      return { icon: "✅", title: d.name, lines: [d.done ? "Resolvido" : `Renovado · próximo vencimento ${fmtBR(d.dueDate)}`] };
+    }
+    case "add_shopping_routine": {
+      const name = cap(a.item);
+      const r = await upsertRoutine(db, access, name, a.everyDays, a.addNow ? today : addDays(today, a.everyDays));
+      if (a.addNow) await ensureRoutines(db, access, today);
+      return { icon: "🔁", title: `${name} de rotina`, lines: [`Volta para a lista a cada ~${r.everyDays} dias`, a.addNow ? "Já coloquei na lista agora" : `Próxima vez: ${fmtBR(r.nextDate)}`, "Quando marcar como comprado, recomeço a contagem"] };
+    }
+    case "cancel_shopping_routine": {
+      const rows = await db.update(shoppingRoutines).set({ active: false })
+        .where(and(visible(shoppingRoutines, access), sql`lower(${shoppingRoutines.name}) = ${a.item.trim().toLowerCase()}`)).returning();
+      if (!rows.length) return null;
+      return { icon: "🗑️", title: `${rows[0].name}`, lines: ["Não volta mais sozinho para a lista"] };
+    }
     case "add_card": {
       const cards = await userCards(db, userId);
       if (cards.length >= 10) return null;
@@ -255,7 +281,7 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       const n = a.installments;
       const totalCents = a.amount ? toCents(a.amount) : toCents(a.installmentAmount!) * n;
       const catKey = (await cats()).resolve(a.category, a.description, "EXPENSE");
-      const r = await addPurchase(db, userId, card, { description: cap(a.description), totalCents, installments: n, purchaseDate: a.date ?? today, categoryKey: catKey });
+      const r = await addPurchase(db, userId, card, { description: cap(a.description), totalCents, installments: n, purchaseDate: a.date ?? today, categoryKey: catKey }, today);
       const cat = (await cats()).get(catKey);
       return { icon: "💳", title: `${cap(a.description)} · ${brl(totalCents)}`, lines: [
         `${card.name} · ${n > 1 ? `${n}x de ${brl(r.parts[n - 1])}` : "à vista"} · ${cat.emoji} ${cat.name}`,
@@ -299,6 +325,7 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
         n += rows.length;
       }
       if (!n) return null;
+      if (a.type === "check_shopping") await onBought(db, access, a.items.map((i) => i.trim()), today);
       return { icon: "🛒", title: a.type === "remove_shopping" ? "Removido da lista" : "Comprado", lines: [a.items.map(cap).join(", ")] };
     }
     case "add_subscription": {
@@ -315,7 +342,7 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
       const purchaseDate = a.purchaseDate ?? today;
       const expiresAt = addMonths(purchaseDate, a.months);
       await db.insert(warranties).values({ userId, item: cap(a.item), purchaseDate, months: a.months, expiresAt });
-      return { icon: "🧾", title: `Garantia do ${a.item.toLowerCase()}`, lines: [`Vencimento: ${fmtBR(expiresAt)}`] };
+      return { icon: "🧾", title: `Garantia: ${cap(a.item)}`, lines: [`Até ${fmtBR(expiresAt)} (${a.months} ${a.months === 1 ? "mês" : "meses"})`, "🔔 Aviso 30 dias antes", "📎 Guarde a nota em Casa → Documentos"] };
     }
     case "add_document": {
       await db.insert(documents).values({ userId, name: cap(a.name), category: a.category.toUpperCase() as "OUTRO", date: today, expiresAt: a.expires ?? null, notes: a.notes ?? null });

@@ -394,6 +394,34 @@ export const whatsappInbound = pgTable("whatsapp_inbound", {
   receivedAt: createdAt(),
 });
 
+// ─────────────── Não deixe nada passar ───────────────
+/** Vencimentos e renovações: seguro, CNH, IPVA, contrato, revisão… Avisa X dias antes. */
+export const deadlines = pgTable("deadlines", {
+  id: id(),
+  userId: userId(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("outro"),          // seguro, documento, imposto, contrato, revisao, outro
+  dueDate: date("due_date", { mode: "string" }).notNull(),
+  remindDaysBefore: integer("remind_days_before").notNull().default(30),
+  renewMonths: integer("renew_months"),                    // renova sozinho (ex.: seguro = 12)
+  notes: text("notes"),
+  done: boolean("done").notNull().default(false),
+  doneAt: timestamp("done_at", { withTimezone: true, mode: "date" }),
+  createdAt: createdAt(),
+}, (t) => [index("deadlines_user_idx").on(t.userId, t.done, t.dueDate)]);
+
+/** Compras de rotina: "ração quando estiver acabando" → volta para a lista a cada N dias. */
+export const shoppingRoutines = pgTable("shopping_routines", {
+  id: id(),
+  userId: userId(),
+  householdId: text("household_id").references(() => households.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  everyDays: integer("every_days").notNull().default(30),
+  nextDate: date("next_date", { mode: "string" }).notNull(),
+  active: boolean("active").notNull().default(true),
+  createdAt: createdAt(),
+}, (t) => [index("shopping_routines_user_idx").on(t.userId, t.active, t.nextDate)]);
+
 // ─────────────── Cartões de crédito ───────────────
 export const creditCards = pgTable("credit_cards", {
   id: id(),
@@ -446,6 +474,8 @@ export const cardInvoicePayments = pgTable("card_invoice_payments", {
 
 export type User = typeof users.$inferSelect;
 export type CreditCard = typeof creditCards.$inferSelect;
+export type Deadline = typeof deadlines.$inferSelect;
+export type ShoppingRoutine = typeof shoppingRoutines.$inferSelect;
 export type CardPurchase = typeof cardPurchases.$inferSelect;
 export type CardInstallment = typeof cardInstallments.$inferSelect;
 export type Task = typeof tasks.$inferSelect;

@@ -3,8 +3,10 @@
  * Cobre os casos mais comuns do dia a dia. A IA (llm.ts) cobre o resto.
  * Função pura: facilita testes.
  */
-import { addDays, dateInMonth, addMonths, weekday, cap, relDay, fmtBR } from "../dates";
+import { addDays, dateInMonth, addMonths, weekday, cap, relDay, fmtBR, MESES } from "../dates";
 import { firstDueDate } from "../cards";
+import { parseMonthDate } from "../watch";
+import { explainFree, explainSimulation, type Budget } from "../budget";
 import { brl, toCents } from "../money";
 
 type Out = { reply: string; actions: Record<string, unknown>[]; suggestion?: Record<string, unknown> | null };
@@ -68,12 +70,12 @@ export function guessCategory(text: string): string {
   const map: [string, RegExp][] = [
     ["alimentacao", /mercado|almoco|jantar|lanche|restaurante|padaria|ifood|cafe|pizza|comida|acougue|feira|hortifruti/],
     ["transporte", /uber|\b99\b|gasolina|combust|onibus|metro|estacionamento|oficina|pedagio/],
-    ["saude", /farmacia|remedio|medico|dentista|exame|consulta|hospital/],
+    ["saude", /farmacia|remedio|medico|dentista|exame|consulta|hospital|academia|plano de saude/],
     ["assinaturas", /netflix|spotify|assinatura|prime video|disney|youtube premium/],
-    ["casa", /\bluz\b|energia|\bagua\b|internet|aluguel|condominio|\bgas\b|faxina|diarista/],
+    ["casa", /\bluz\b|energia|\bagua\b|internet|aluguel|condominio|\bgas\b|faxina|diarista|racao|pet\b|veterinari/],
     ["educacao", /escola|curso|faculdade|livro|mensalidade/],
     ["lazer", /cinema|show|\bbar\b|viagem|passeio|ingresso|festa/],
-    ["compras", /roupa|tenis|camisa|calca|sapato|presente|loja|celular|fone|ar-condicionado|geladeira|tv\b/],
+    ["compras", /roupa|tenis|camisa|calca|sapato|presente|loja|celular|fone|ar-condicionado|geladeira|tv\b|televis|notebook|computador|tablet|monitor|impressora|sofa|cama|colchao|armario|mesa|cadeira|maquina de lavar|fogao|micro-?ondas|eletro|movel|moveis/],
   ];
   for (const [k, re] of map) if (re.test(s)) return k;
   return "outros";
@@ -103,7 +105,20 @@ function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
 }
 const catName = (key: string) => userCats.find((c) => c.key === key)?.name ?? CAT_NAME[key] ?? "Outros";
 
-export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {}, opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[] } = {}): Out {
+export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {},
+  opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[]; budget?: Budget | null; financeEnabled?: boolean } = {}): Out {
+  const sN = norm(text);
+  // "Posso gastar?" — pergunta respondida com o orçamento do mês
+  if (/\b(posso|consigo|da pra|da para)\b.{0,30}\b(gastar|comprar)\b|quanto (eu )?posso gastar|quanto (da|sobra) (pra|para) gastar/.test(sN)) {
+    if (opts.financeEnabled === false) return { reply: "O “Posso gastar?” faz parte do plano Premium: eu analiso renda, contas, fixos, cartão e assinaturas para te dizer quanto sobra. 💡", actions: [] };
+    if (opts.budget) {
+      const m = purchaseMoney(text);
+      const n = Number(sN.match(/\b(\d{1,2})\s*(?:x|vezes|parcelas)\b/)?.[1] ?? 1);
+      const total = m.total ?? (m.each ? m.each * n : null);
+      if (total && /\b(comprar|gastar)\b.{0,60}\d/.test(sN)) return { reply: explainSimulation(opts.budget, toCents(total), n), actions: [] };
+      return { reply: explainFree(opts.budget), actions: [] };
+    }
+  }
   userCats = opts.categories ?? [];
   userCardsList = opts.cards ?? [];
   let out: Out;
@@ -170,6 +185,88 @@ function fallbackCore(text: string, today: string, history: { lastUser?: string;
   const n = out.actions.filter((a) => a.type !== "remember").length;
   out.reply = [n ? `Pronto! Organizei ${n} ${n === 1 ? "item" : "itens"} para você. 👍` : "", ...replies].filter(Boolean).join(" ");
   return out;
+}
+
+const PROBLEM = /(barulh|quebr|vazand|vazamento|pingando|entupi|nao (esta |ta |tá )?funcionando|nao funciona|parou de funcionar|estragou|estragad|com defeito|pifou|nao liga|nao esquenta|nao gela|esquentando demais|rachad|trincad|goteira|infiltra|mofo|curto|desregulad|falhando)/;
+const DEADLINE_ITEMS: [RegExp, string, string, number | null][] = [
+  [/seguro (do |da )?(carro|auto|moto)|seguro auto/, "Seguro do carro", "seguro", 12],
+  [/seguro (de |da )?(casa|residencia|residencial)/, "Seguro da casa", "seguro", 12],
+  [/seguro (de |da )?vida/, "Seguro de vida", "seguro", 12],
+  [/\bseguro\b/, "Seguro", "seguro", 12],
+  [/\bcnh\b|carteira de motorista|habilitacao/, "CNH", "documento", null],
+  [/passaporte/, "Passaporte", "documento", null],
+  [/\brg\b|identidade/, "RG", "documento", null],
+  [/\bipva\b/, "IPVA", "imposto", 12],
+  [/\biptu\b/, "IPTU", "imposto", 12],
+  [/licenciamento/, "Licenciamento do carro", "imposto", 12],
+  [/contrato (do |de )?aluguel/, "Contrato do aluguel", "contrato", null],
+  [/\bcontrato\b/, "Contrato", "contrato", null],
+  [/revisao (do |da )?(carro|moto)/, "Revisão do carro", "revisao", null],
+  [/vistoria/, "Vistoria", "revisao", null],
+  [/plano de saude|convenio/, "Plano de saúde", "contrato", 12],
+  [/vacina/, "Vacina", "outro", null],
+  [/dominio|certificado digital/, "Certificado/domínio", "documento", 12],
+];
+const ROUTINE = /(quando (estiver|tiver|for|ta|tá|esta) (acabando|no fim|terminando)|toda semana|todo mes|todos os meses|toda quinzena|a cada (\d+) (dias|semanas)|de (\d+) em \d+ dias|sempre que acabar)/;
+
+function parseWatch(raw: string, s: string, today: string): Out | null {
+  // compra de rotina: "preciso comprar ração quando estiver acabando", "compro café toda semana"
+  if (ROUTINE.test(s) && /\b(comprar|compro|repor|reponho|acaba|acabar)\b/.test(s)) {
+    const item = raw.match(/(?:comprar|compro|repor|reponho)\s+(?:mais\s+)?(?:o\s+|a\s+|os\s+|as\s+)?(.+?)(?=\s+(?:quando|toda|todo|todos|a cada|de \d+|sempre)\b|[,.!]|$)/i)?.[1]
+      ?? raw.match(/^(?:a\s+|o\s+)?(.+?)\s+(?:acaba|termina)/i)?.[1];
+    if (!item) return null;
+    const every = /toda semana/.test(s) ? 7 : /quinzena/.test(s) ? 15 : (() => {
+      const m = s.match(/a cada (\d+) (dias|semanas)/) ?? s.match(/de (\d+) em \d+ dias/);
+      return m ? Number(m[1]) * (m[2] === "semanas" ? 7 : 1) : 30;
+    })();
+    const name = cap(item.replace(/^(de|do|da)\s+/i, "").trim());
+    const addNow = /(acabando|no fim|terminando|acabou)/.test(s) && !/quando/.test(s);
+    return { reply: `Combinado! Vou colocar ${name.toLowerCase()} na lista de compras a cada ~${every} dias${addNow ? " (e já coloquei agora)" : ""}. Quando você marcar como comprado, recomeço a contagem. 🔁`,
+      actions: [{ type: "add_shopping_routine", item: name, everyDays: every, addNow }] };
+  }
+  // garantia na mesma frase: "comprei uma televisão hoje, a garantia é de 12 meses"
+  const war = s.match(/garantia (?:e |eh |é |de |dura )*(?:de )?(\d+)\s*(ano|anos|mes|meses)/) ?? s.match(/(\d+)\s*(ano|anos|mes|meses) de garantia/);
+  if (war && /\bcomprei\b/.test(s)) {
+    const months = Number(war[1]) * (war[2].startsWith("ano") ? 12 : 1);
+    const item = raw.match(/comprei\s+(?:um\s+|uma\s+|o\s+|a\s+)?([A-Za-zÀ-ú\- ]{3,40}?)(?=\s+(?:hoje|ontem|por|de r\$|de \d|no|na|e a|,)|[,.]|$)/i)?.[1]?.trim();
+    if (!item) return null;
+    const date = /\bontem\b/.test(s) ? addDays(today, -1) : today;
+    const until = addMonths(date, months);
+    const actions: Out["actions"] = [{ type: "add_warranty", item: cap(item), months, purchaseDate: date }];
+    const val = purchaseMoney(raw.replace(/(\d+)\s*(ano|anos|m[eê]s|meses)/gi, "")).total;
+    if (val && val > 1) actions.push({ type: "add_transaction", kind: "expense", amount: val, category: guessCategory(s), description: cap(item), date });
+    return { reply: `Anotado! ${cap(item)} com garantia até ${MESES[Number(until.slice(5, 7)) - 1]}/${until.slice(0, 4)}. Te aviso 30 dias antes. Guarde a nota fiscal em Casa → Documentos. 🧾`, actions };
+  }
+  // problema: "minha geladeira está fazendo um barulho estranho"
+  if (PROBLEM.test(s) && !/\b(comprei|gastei|paguei)\b/.test(s)) {
+    const om = raw.match(/\b(meu|minha|o|a|nosso|nossa)\s+([A-Za-zÀ-ú\-]+(?:\s+(?:de|do|da)\s+[A-Za-zÀ-ú]+)?)/i);
+    const thing = om && !/^(casa|gente|vez|noite|dia)$/i.test(om[2]) ? om[2].toLowerCase() : null;
+    const art = om && /^(minha|a|nossa)$/i.test(om[1]) ? "a" : "o";
+    const title = thing ? `Chamar alguém para ver ${art} ${thing}` : `Resolver: ${raw.replace(/[.!]+$/, "").slice(0, 80)}`;
+    const tomorrow = addDays(today, 1);
+    return {
+      reply: `Poxa${thing ? `, ${thing} com problema é chato` : ""}! Anotei para não passar. 📝`,
+      actions: [],
+      suggestion: { text: "Quer que eu crie uma tarefa para amanhã às 10h?", yes: "Sim, criar", no: "Agora não", action: { type: "add_task", title: cap(title.trim()), due: tomorrow, time: "10:00" } },
+    };
+  }
+  // vencimento/renovação: "meu seguro vence em dezembro", "a CNH vence dia 20 de março de 2027"
+  if (/\b(vence|vencimento|renov|expira|termina|acaba)\w*/.test(s) && !/\b(conta de|boleto|fatura|cartao)\b/.test(s)) {
+    const hit = DEADLINE_ITEMS.find(([re]) => re.test(s));
+    if (!hit) return null;
+    const md = parseMonthDate(raw, today) ?? (() => { const d = parseDate(raw, today); return d ? { date: d, exactDay: true } : null; })();
+    // "preciso renovar minha CNH" (sem data) é uma tarefa, não um vencimento
+    if (!md && /\b(preciso|tenho que|vou)\b/.test(s)) return null;
+    if (!md) return { reply: `Quando vence: ${hit[1]}? Pode ser só o mês, ex.: “em dezembro”.`, actions: [] };
+    const [, name, kind, renew] = hit;
+    const remind = 30;
+    const from = addDays(md.date, -remind);
+    return {
+      reply: `Anotado! ${name} vence em ${md.exactDay ? fmtBR(md.date) : `${MESES[Number(md.date.slice(5, 7)) - 1]}/${md.date.slice(0, 4)}`}. Te aviso ${from <= today ? "desde já" : `a partir de ${fmtBR(from)}`} (30 dias antes).${md.exactDay ? "" : " Se souber o dia exato, me fala."} 📌`,
+      actions: [{ type: "add_deadline", name, date: md.date, remindDaysBefore: remind, renewMonths: renew ?? undefined, kind }],
+    };
+  }
+  return null;
 }
 
 const BANKS = /\b(nubank|nu|inter|itau|bradesco|santander|caixa|c6|bb|banco do brasil|next|picpay|mercado pago|neon|original|pan|xp|porto( seguro)?|carrefour|riachuelo|renner|sicredi|sicoob|will|ourocard|elo|visa|mastercard|amex|digio|btg|credicard|hipercard|magalu|americanas)\b/;
@@ -351,6 +448,10 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
   const cardCmd = parseCard(raw, s, today);
   if (cardCmd) return cardCmd;
 
+  // não deixe nada passar: problemas, vencimentos, garantias, compras de rotina
+  const watch = parseWatch(raw, s, today);
+  if (watch) return watch;
+
   // categorias: "cria a categoria Beleza", "barbearia vai na categoria Beleza", "apaga a categoria Beleza"
   const catCmd = parseCategory(raw, s);
   if (catCmd) return catCmd;
@@ -441,8 +542,12 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
 
   // tarefa
   if (/\b(preciso|tenho que|nao posso esquecer|anota)\b/.test(s)) {
-    const title = cap(stripDateWords(raw.replace(/.*?\b(preciso|tenho que|não posso esquecer de|nao posso esquecer de|anota)\b\s*(de |que )?/i, "")).replace(/[.!]$/, ""));
-    return { reply: `Anotei a tarefa${date ? ` para ${relDay(date, today).toLowerCase()}` : ""}. ✅`, actions: [{ type: "add_task", title: title || cap(raw), due: date ?? undefined }] };
+    // "semana que vem" sem dia → segunda que vem; "mês que vem" → dia 1 do próximo mês
+    const due = date ?? (/semana que vem|proxima semana/.test(s) ? addDays(today, ((8 - weekday(today)) % 7) || 7)
+      : /mes que vem|proximo mes/.test(s) ? addMonths(today.slice(0, 8) + "01", 1) : null);
+    const title = cap(stripDateWords(raw.replace(/.*?\b(preciso|tenho que|não posso esquecer de|nao posso esquecer de|anota)\b\s*(de |que )?/i, ""))
+      .replace(/\s*(para |pra |na |no )?(a )?(semana que vem|próxima semana|proxima semana|mês que vem|mes que vem|próximo mês|proximo mes)/i, "").replace(/[.!]$/, ""));
+    return { reply: `Anotei a tarefa${due ? ` para ${relDay(due, today).toLowerCase()}` : ""}. ✅`, actions: [{ type: "add_task", title: title || cap(raw), due: due ?? undefined }] };
   }
 
   if (/^(oi|ola|bom dia|boa tarde|boa noite|e ai)\b/.test(s)) return { reply: "Oi! Me conta o que você precisa lembrar, pagar ou comprar. 😊", actions: [] };

@@ -50,7 +50,7 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
 |---|---|
 | `npm run dev` / `npm run build && npm start` | Desenvolvimento / produção |
 | `npm run worker` | Roda o "tick" (avisos e assinaturas) a cada 5 minutos, localmente |
-| `npm test` | 35 testes de ponta a ponta, contra um Postgres real em memória (PGlite), sem Docker |
+| `npm test` | 42 testes de ponta a ponta, contra um Postgres real em memória (PGlite), sem Docker |
 | `npm run typecheck` | Checagem de tipos |
 | `npm run secrets` | Gera AUTH_SECRET, CRON_SECRET, a chave de arquivos, as chaves VAPID e os tokens de webhook |
 | `npm run db:generate` / `npm run db:migrate` | Gera / aplica migrações |
@@ -103,6 +103,18 @@ Só `DATABASE_URL` e `AUTH_SECRET` são obrigatórios. O resto liga recursos, e 
   - A aba Cartões mostra a fatura a pagar, a fatura aberta, as próximas faturas, as parcelas em andamento e o limite usado.
   - A fatura entra em "Contas a pagar", com aviso e o botão "Paguei".
   - As parcelas do mês contam nos gastos e nas categorias.
+- **Não deixe nada passar** (página `/pendencias`).
+  - Problema: "A geladeira está fazendo barulho" → "Quer que eu crie uma tarefa para amanhã às 10h?"
+  - Vencimento: "Meu seguro vence em dezembro" → avisa 30 dias antes e renova todo ano.
+  - Garantia: "Comprei uma TV hoje, garantia de 12 meses" → garantia até out/2027, com aviso antes.
+  - Compra de rotina: "Ração quando estiver acabando" → volta para a lista a cada ~30 dias e recomeça a contagem quando a pessoa compra.
+- **Assistente de Pendências** (tela inicial).
+  - Uma lista "Hoje" com 🔴 vencido, 🟡 fazer hoje ou em breve, 🔵 compromissos e 🟢 o que está chegando.
+  - Cada item tem uma ação rápida (concluir, Paguei, Renovei).
+  - Abaixo, o "Tem algo que você precisa resolver? 🎙️".
+- **Posso gastar?**
+  - Calcula a margem do mês: receitas previstas menos gastos, contas, fixos, parcelas do cartão e assinaturas, deixando uma folga de 10%.
+  - Simula compras à vista e parceladas ("Posso comprar um celular de R$ 1.500?").
 - **Plano Família.**
   - Até 5 pessoas, com convite por link de uso único.
   - Lista de compras da família, e agenda e tarefas compartilhadas quando você disser "a gente…" ou "da família".
@@ -141,7 +153,7 @@ src/
   db/schema.ts     todas as tabelas
 public/sw.js       service worker (push + offline)
 drizzle/           migrações SQL
-tests/             nina.test.ts (MVP) · fase2.test.ts · fixos.test.ts · categorias.test.ts · cartoes.test.ts
+tests/             nina.test.ts (MVP) · fase2.test.ts · fixos.test.ts · categorias.test.ts · cartoes.test.ts · pendencias.test.ts
 docs/              ARQUITETURA.md · INTEGRACOES.md
 ```
 

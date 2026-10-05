@@ -36,6 +36,13 @@
       "when": 1790956301274,
       "tag": "0004_cartoes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791211760851,
+      "tag": "0005_pendencias",
+      "breakpoints": true
     }
   ]
 }

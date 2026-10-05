@@ -154,13 +154,20 @@ export async function monthCardSpend(db: DB, userId: string, from: string, to: s
 // ─────────────── Alterações ───────────────
 
 export async function addPurchase(db: DB, userId: string, card: CreditCard,
-  p: { description: string; totalCents: number; installments: number; purchaseDate: string; categoryKey: string }) {
+  p: { description: string; totalCents: number; installments: number; purchaseDate: string; categoryKey: string }, today?: string) {
   const [purchase] = await db.insert(cardPurchases).values({ userId, cardId: card.id, ...p }).returning();
   const parts = splitInstallments(p.totalCents, p.installments);
-  await db.insert(cardInstallments).values(parts.map((amountCents, i) => ({
+  const rows = parts.map((amountCents, i) => ({
     userId, cardId: card.id, purchaseId: purchase.id, number: i + 1, amountCents,
     dueDate: installmentDueDate(p.purchaseDate, card.closingDay, card.dueDay, i + 1),
-  })));
+  }));
+  await db.insert(cardInstallments).values(rows);
+  // compra antiga cadastrada agora: as faturas que já venceram foram pagas (senão apareceriam como atrasadas)
+  if (today) {
+    for (const r of rows.filter((x) => x.dueDate < today)) {
+      await db.insert(cardInvoicePayments).values({ userId, cardId: card.id, dueDate: r.dueDate, amountCents: r.amountCents }).onConflictDoNothing();
+    }
+  }
   return { purchase, parts, firstDue: installmentDueDate(p.purchaseDate, card.closingDay, card.dueDay, 1), lastDue: installmentDueDate(p.purchaseDate, card.closingDay, card.dueDay, p.installments) };
 }
 
