@@ -103,7 +103,11 @@ export default async function ConfigPage() {
         )}
 
         <form action={logout}><button className="btn btn-ghost w-full">Sair</button></form>
-        <p className="text-center text-[12px] text-ink-3">Organiza · versão {APP_VERSION}</p>
+        <Link href="/excluir-conta" className="card flex items-center justify-between">
+          <div><div className="font-medium text-bad">Excluir minha conta</div><div className="text-sm text-ink-3">Apaga todos os seus dados de forma definitiva</div></div>
+          <span className="text-ink-3">›</span>
+        </Link>
+        <p className="text-center text-[12px] text-ink-3"><Link href="/privacidade" className="underline">Política de Privacidade</Link> · Organiza · versão {APP_VERSION}</p>
       </div>
     </>
   );

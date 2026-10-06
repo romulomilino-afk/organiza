@@ -6,6 +6,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         Organiza
       </div>
       {children}
+      <a href="/privacidade" className="text-center text-sm text-ink-3 underline">Política de Privacidade</a>
     </main>
   );
 }

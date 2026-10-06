@@ -4,7 +4,7 @@ import type { NextAuthConfig } from "next-auth";
  * Parte da configuração que roda no middleware (Edge): sem banco, sem bcrypt.
  */
 // Webhooks e cron têm autenticação própria (assinatura/segredo), não sessão.
-const PUBLIC = ["/login", "/cadastro", "/api/auth", "/api/register", "/api/cron", "/api/webhooks"];
+const PUBLIC = ["/login", "/cadastro", "/privacidade", "/excluir-conta", "/.well-known", "/api/auth", "/api/register", "/api/cron", "/api/webhooks"];
 
 export const authConfig = {
   pages: { signIn: "/login" },
