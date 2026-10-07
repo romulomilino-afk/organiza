@@ -54,7 +54,7 @@ export default async function ConfigPage() {
 
         <div className="card flex flex-col gap-2">
           <div className="flex items-baseline justify-between"><div className="eyebrow">Plano</div><Link href="/planos" className="text-sm font-semibold text-accent">Ver planos</Link></div>
-          <b className="font-display text-xl">{PLANS[plan].name}{plan !== access.ownPlan ? " · pela família" : ""}</b>
+          <b className="font-display text-xl">{access.trial?.active ? "Teste grátis · tudo liberado" : `${PLANS[plan].name}${plan !== access.ownPlan ? " · pela família" : ""}`}</b>
           <div className="text-sm text-ink-2">Conversas com a Nina este mês: <b className="num">{usage.used}</b> de {usage.limit}</div>
           <div className="h-2 overflow-hidden rounded-full bg-surface-2"><i className={`block h-full rounded-full ${pct > 85 ? "bg-warn" : "bg-accent"}`} style={{ width: `${pct}%` }} /></div>
         </div>

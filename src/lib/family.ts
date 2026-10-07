@@ -7,7 +7,7 @@ import { and, count, eq, gt, isNull } from "drizzle-orm";
 import type { DB } from "@/db";
 import { householdInvites, householdMembers, households, users, type User } from "@/db/schema";
 import { getAccess } from "./access";
-import { PLANS } from "./plans";
+import { PLANS, planWithTrial, type PlanId } from "./plans";
 import { AppError } from "./errors";
 import { log } from "./logger";
 
@@ -15,7 +15,7 @@ const MAX = PLANS.FAMILY.maxMembers;
 const hash = (t: string) => createHash("sha256").update(t).digest("hex");
 
 export async function createHousehold(db: DB, user: User, name: string) {
-  if (user.plan !== "FAMILY") throw new AppError(402, "Criar uma família faz parte do plano Família.", "plan_required");
+  if (planWithTrial(user.plan as PlanId, user.trialEndsAt) !== "FAMILY") throw new AppError(402, "Criar uma família faz parte do plano Família.", "plan_required");
   const a = await getAccess(db, user);
   if (a.household) throw new AppError(409, "Você já participa de uma família.", "already_member");
   const [h] = await db.insert(households).values({ name: name.trim().slice(0, 60) || "Minha família", ownerId: user.id }).returning();

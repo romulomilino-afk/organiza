@@ -22,7 +22,7 @@ export default async function FamiliaPage() {
             <li>📅 Agenda e tarefas da família</li>
             <li>💰 Gastos da casa compartilhados (se quiserem)</li>
           </ul>
-          {user.plan === "FAMILY" ? <CreateFamilyForm /> : (
+          {access.ownPlan === "FAMILY" ? <CreateFamilyForm /> : (
             <>
               <p className="text-sm text-ink-2">Para criar uma família, assine o plano Família. Para entrar numa família, peça o link de convite a quem criou.</p>
               <Link href="/planos" className="btn w-fit">Ver plano Família</Link>

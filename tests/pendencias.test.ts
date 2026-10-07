@@ -24,7 +24,7 @@ delete process.env.ANTHROPIC_API_KEY;
 const TZ = "America/Sao_Paulo";
 let db: DB;
 const mk = async (email: string, plan: "FREE" | "PREMIUM" = "PREMIUM") => {
-  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, timezone: TZ }).returning();
+  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, timezone: TZ, trialEndsAt: null }).returning();
   await ensureUserSetup(db, u.id);
   return u;
 };

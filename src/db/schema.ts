@@ -11,6 +11,7 @@ import {
   pgTable, pgEnum, text, integer, boolean, timestamp, date, jsonb, primaryKey, index, uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
+import { sql } from "drizzle-orm";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const userId = () => text("user_id").notNull().references(() => users.id, { onDelete: "cascade" });
@@ -45,6 +46,8 @@ export const users = pgTable("users", {
   onboarded: boolean("onboarded").notNull().default(false),
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
   currency: text("currency").notNull().default("BRL"), // BRL | USD | EUR
+  // teste grátis: todas as funções liberadas até esta data (contas novas: 7 dias a partir do cadastro)
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true, mode: "date" }).default(sql`now() + interval '7 days'`),
   asaasCustomerId: text("asaas_customer_id"),
   phone: text("phone").unique(),                 // WhatsApp vinculado, formato E.164 sem "+"
   phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true, mode: "date" }),

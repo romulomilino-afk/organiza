@@ -26,6 +26,7 @@ export default async function CartoesPage() {
         <PageHeader title="Dinheiro" subtitle="Cartões de crédito" />
         <div className="card flex flex-col gap-3">
           <p className="text-[17px]">Controle faturas e parcelas só falando: “comprei uma TV de 3.000 em 10x no Nubank”.</p>
+{access.trial && !access.trial.active && <p className="font-semibold">Seu teste grátis acabou, mas seus dados continuam guardados. Assine para voltar a ver tudo.</p>}
           <p className="text-ink-2">Os cartões fazem parte do plano Premium ({brl(PLANS.PREMIUM.priceCents, "BRL")}/mês).</p>
           <Link href="/planos" className="btn w-fit">Ver planos</Link>
         </div>

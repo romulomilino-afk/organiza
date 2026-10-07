@@ -28,8 +28,9 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
         <PageHeader title="Dinheiro" subtitle="Receitas, despesas e contas" />
         <div className="card flex flex-col gap-3">
           <p className="text-[17px]">Registre seus gastos só falando: “Gastei 45 reais no almoço”.</p>
+{access.trial && !access.trial.active && <p className="font-semibold">Seu teste grátis acabou, mas seus dados continuam guardados. Assine para voltar a ver tudo.</p>}
           <p className="text-ink-2">O financeiro faz parte do plano Premium ({brl(PLANS.PREMIUM.priceCents, "BRL")}/mês), junto com memória, áudio e lembretes inteligentes.</p>
-          <Link href="/config" className="btn w-fit">Ver planos</Link>
+          <Link href="/planos" className="btn w-fit">Ver planos</Link>
         </div>
       </>
     );

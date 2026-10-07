@@ -57,6 +57,13 @@
       "when": 1791225244852,
       "tag": "0007_moedas",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791320070427,
+      "tag": "0008_teste",
+      "breakpoints": true
     }
   ]
 }

@@ -9,12 +9,13 @@ import { and, eq, isNull, or, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { DB } from "@/db";
 import { householdMembers, households, users, type User } from "@/db/schema";
-import type { PlanId } from "./plans";
+import { planWithTrial, trialInfo, type PlanId, type Trial } from "./plans";
 
 export type Access = {
   userId: string;
-  plan: PlanId;          // plano efetivo (membros de família herdam FAMILY)
-  ownPlan: PlanId;
+  plan: PlanId;          // plano efetivo (membros de família herdam FAMILY; teste grátis vale como FAMILY)
+  ownPlan: PlanId;       // plano da própria pessoa (já contando o teste grátis)
+  trial: Trial | null;   // teste grátis de quem está no Grátis (ativo ou já encerrado)
   timezone: string;
   currency: string;
   household: { id: string; name: string; role: "OWNER" | "MEMBER"; ownerId: string; shareFinance: boolean; active: boolean } | null;
@@ -23,25 +24,26 @@ export type Access = {
 export async function getAccess(db: DB, user: User): Promise<Access> {
   const [m] = await db.select({
     id: households.id, name: households.name, ownerId: households.ownerId, shareFinance: households.shareFinance,
-    role: householdMembers.role, ownerPlan: users.plan,
+    role: householdMembers.role, ownerPlan: users.plan, ownerTrialEndsAt: users.trialEndsAt,
   }).from(householdMembers)
     .innerJoin(households, eq(households.id, householdMembers.householdId))
     .innerJoin(users, eq(users.id, households.ownerId))
     .where(eq(householdMembers.userId, user.id)).limit(1);
 
-  const ownPlan = user.plan as PlanId;
-  // a família só está "ativa" (compartilhando) enquanto o dono tiver o plano Família
-  const active = !!m && m.ownerPlan === "FAMILY";
+  const ownPlan = planWithTrial(user.plan as PlanId, user.trialEndsAt);
+  // a família só está "ativa" (compartilhando) enquanto o dono tiver o plano Família (ou estiver no teste grátis)
+  const active = !!m && planWithTrial(m.ownerPlan as PlanId, m.ownerTrialEndsAt) === "FAMILY";
   const plan: PlanId = active ? "FAMILY" : ownPlan;
   return {
-    userId: user.id, plan, ownPlan, timezone: user.timezone, currency: user.currency ?? "BRL",
+    userId: user.id, plan, ownPlan, trial: trialInfo(user.plan as PlanId, user.trialEndsAt), timezone: user.timezone, currency: user.currency ?? "BRL",
     household: m ? { id: m.id, name: m.name, role: m.role, ownerId: m.ownerId, shareFinance: m.shareFinance, active } : null,
   };
 }
 
 /** Acesso de quem não participa de família (testes e canais sem família). */
-export function soloAccess(user: Pick<User, "id" | "plan" | "timezone"> & { currency?: string | null }): Access {
-  return { userId: user.id, plan: user.plan as PlanId, ownPlan: user.plan as PlanId, timezone: user.timezone, currency: user.currency ?? "BRL", household: null };
+export function soloAccess(user: Pick<User, "id" | "plan" | "timezone"> & { currency?: string | null; trialEndsAt?: Date | null }): Access {
+  const plan = planWithTrial(user.plan as PlanId, user.trialEndsAt);
+  return { userId: user.id, plan, ownPlan: plan, trial: trialInfo(user.plan as PlanId, user.trialEndsAt), timezone: user.timezone, currency: user.currency ?? "BRL", household: null };
 }
 
 export function sharedHouseholdId(a: Access): string | null {

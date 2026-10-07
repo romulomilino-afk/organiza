@@ -33,7 +33,7 @@ process.env.AUTH_SECRET = "test-secret";
 
 let db: DB;
 const mk = async (email: string, plan: "FREE" | "PREMIUM" | "FAMILY", name = email.split("@")[0]) => {
-  const [u] = await db.insert(schema.users).values({ email, name, plan, onboarded: true }).returning();
+  const [u] = await db.insert(schema.users).values({ email, name, plan, onboarded: true, trialEndsAt: null }).returning();
   await ensureUserSetup(db, u.id);
   return u;
 };

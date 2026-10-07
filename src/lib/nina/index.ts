@@ -50,14 +50,17 @@ async function countInteraction(db: DB, userId: string, month: string) {
 }
 
 /** Remove ações de recursos fora do plano e devolve a nota para o usuário. */
-function gateByPlan(plan: PlanId, actions: Action[]) {
+function gateByPlan(plan: PlanId, actions: Action[], trialEnded = false) {
   const allowed: Action[] = [];
   let blocked = false;
   for (const a of actions) {
     if (hasFeature(plan, ACTION_FEATURE[a.type])) allowed.push(a);
     else if (a.type !== "remember") blocked = true;
   }
-  return { allowed, note: blocked ? "Essa parte (financeiro, assinaturas ou garantias) faz parte do plano Premium." : "" };
+  const msg = trialEnded
+    ? "Seu teste grátis acabou, e essa parte (financeiro, documentos e mais) agora faz parte dos planos Premium e Família. Assine em Planos para continuar."
+    : "Essa parte (financeiro, assinaturas ou garantias) faz parte do plano Premium.";
+  return { allowed, note: blocked ? msg : "" };
 }
 
 export async function handleMessage(db: DB, user: User, text: string, source: "TEXT" | "VOICE" = "TEXT", accessIn?: Access): Promise<{ user: ChatMessage; assistant: ChatMessage; mode: "ai" | "rules" }> {
@@ -70,7 +73,7 @@ async function handleMessageInner(db: DB, user: User, text: string, source: "TEX
   const plan = access.plan;
   const usage = await usageThisMonth(db, user, plan);
   if (usage.used >= usage.limit) {
-    throw new AppError(402, `Você usou as ${usage.limit} interações do plano ${PLANS[plan].name} este mês. Assine o Premium para continuar conversando com a Nina.`, "limit_reached");
+    throw new AppError(402, `Você usou as ${usage.limit} interações do plano ${PLANS[plan].name} este mês. ${access.trial && !access.trial.active ? "Seu teste grátis acabou: assine" : "Assine"} o Premium ou o Família para continuar conversando com a Nina.`, "limit_reached");
   }
 
   const today = todayIn(user.timezone);
@@ -106,7 +109,7 @@ async function handleMessageInner(db: DB, user: User, text: string, source: "TEX
     out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards, budget, financeEnabled: hasFeature(plan, "financeiro"), currency: (isCurrency(user.currency) ? user.currency : "BRL"), rates }));
   }
 
-  const { allowed, note } = gateByPlan(plan, out.actions);
+  const { allowed, note } = gateByPlan(plan, out.actions, !!access.trial && !access.trial.active);
   const exec = await executeActions(db, access, today, allowed);
 
   // sugestão: resolve "new:N" para o id real agora, para executar com segurança depois

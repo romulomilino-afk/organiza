@@ -20,7 +20,7 @@ import { CATEGORIES } from "../src/lib/categories";
 delete process.env.ANTHROPIC_API_KEY;
 let db: DB;
 const mk = async (email: string, plan: "FREE" | "PREMIUM" = "PREMIUM") => {
-  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true }).returning();
+  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, trialEndsAt: null }).returning();
   await ensureUserSetup(db, u.id);
   return u;
 };

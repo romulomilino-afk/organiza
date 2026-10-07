@@ -22,7 +22,7 @@ const CREATED = new Date("2026-10-01T15:00:00Z"); // 01/10/2026, 12h em São Pau
 
 let db: DB;
 const mk = async (email: string, plan: "FREE" | "PREMIUM" = "PREMIUM") => {
-  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, timezone: TZ }).returning();
+  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, timezone: TZ, trialEndsAt: null }).returning();
   await ensureUserSetup(db, u.id);
   return u;
 };

@@ -27,9 +27,9 @@ before(async () => {
   const client = new PGlite();
   db = drizzle(client, { schema }) as unknown as DB;
   await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
-  [alice] = await db.insert(schema.users).values({ email: "alice@test.com", name: "Alice", plan: "PREMIUM", onboarded: true }).returning();
-  [bob] = await db.insert(schema.users).values({ email: "bob@test.com", name: "Bob", plan: "PREMIUM", onboarded: true }).returning();
-  [free] = await db.insert(schema.users).values({ email: "free@test.com", name: "Free", plan: "FREE", onboarded: true }).returning();
+  [alice] = await db.insert(schema.users).values({ email: "alice@test.com", name: "Alice", plan: "PREMIUM", onboarded: true, trialEndsAt: null }).returning();
+  [bob] = await db.insert(schema.users).values({ email: "bob@test.com", name: "Bob", plan: "PREMIUM", onboarded: true, trialEndsAt: null }).returning();
+  [free] = await db.insert(schema.users).values({ email: "free@test.com", name: "Free", plan: "FREE", onboarded: true, trialEndsAt: null }).returning();
   for (const u of [alice, bob, free]) await ensureUserSetup(db, u.id);
 });
 

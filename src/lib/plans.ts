@@ -40,7 +40,27 @@ export const ACTION_FEATURE: Record<string, Feature> = {
   remember: "memoria",
 };
 
+/** Plano de quem acabou de se cadastrar. Em produção é sempre o Grátis (com o teste de 7 dias). */
 export function defaultPlan(): PlanId {
+  if (process.env.NODE_ENV === "production") return "FREE";
   const p = process.env.DEFAULT_PLAN;
   return p === "PREMIUM" || p === "FAMILY" ? p : "FREE";
+}
+
+/** Teste grátis: quem está no Grátis usa tudo (como no plano Família) durante os primeiros dias. */
+export const TRIAL_DAYS = 7;
+export const TRIAL_PLAN: PlanId = "FAMILY";
+
+export type Trial = { endsAt: Date; daysLeft: number; active: boolean };
+
+/** Situação do teste de quem está no plano Grátis (null para quem paga ou nunca teve teste). */
+export function trialInfo(plan: PlanId, trialEndsAt: Date | null | undefined, now = new Date()): Trial | null {
+  if (plan !== "FREE" || !trialEndsAt) return null;
+  const ms = trialEndsAt.getTime() - now.getTime();
+  return { endsAt: trialEndsAt, daysLeft: Math.max(0, Math.ceil(ms / 86_400_000)), active: ms > 0 };
+}
+
+/** Plano que vale de fato: Grátis em teste vira Família até o fim do teste. */
+export function planWithTrial(plan: PlanId, trialEndsAt: Date | null | undefined, now = new Date()): PlanId {
+  return trialInfo(plan, trialEndsAt, now)?.active ? TRIAL_PLAN : plan;
 }

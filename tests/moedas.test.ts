@@ -24,7 +24,7 @@ const TZ = "America/Sao_Paulo";
 let db: DB;
 const realFetch = globalThis.fetch;
 const mk = async (email: string, plan: "FREE" | "PREMIUM" | "FAMILY" = "PREMIUM", currency = "BRL") => {
-  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, timezone: TZ, currency }).returning();
+  const [u] = await db.insert(schema.users).values({ email, name: email.split("@")[0], plan, onboarded: true, timezone: TZ, currency, trialEndsAt: null }).returning();
   await ensureUserSetup(db, u.id);
   return u;
 };
