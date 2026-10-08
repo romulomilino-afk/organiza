@@ -29,4 +29,5 @@ export async function cancelAction() {
   const user = await requireUser();
   await cancelBilling(getDb(), user);
   revalidatePath("/", "layout");
+  redirect("/planos?cancelada=1");
 }

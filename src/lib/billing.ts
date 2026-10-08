@@ -10,7 +10,7 @@
  * Fluxo: /planos → CPF/CNPJ → cria cliente → checkout (ou assinatura) → webhook PAYMENT_CONFIRMED/RECEIVED → plano ativado.
  * O CPF/CNPJ vai direto para o Asaas e NÃO é guardado no nosso banco.
  */
-import { and, desc, eq, like, lt, ne } from "drizzle-orm";
+import { and, desc, eq, like, lt, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { billingEvents, billingSubscriptions, users, type User } from "@/db/schema";
 import { PLANS, type PlanId } from "./plans";
@@ -70,6 +70,14 @@ export async function currentBilling(db: DB, userId: string) {
   return row ?? null;
 }
 
+/** Última assinatura cancelada (para mostrar até quando o acesso continua). */
+export async function lastCanceled(db: DB, userId: string) {
+  const [row] = await db.select().from(billingSubscriptions)
+    .where(and(eq(billingSubscriptions.userId, userId), eq(billingSubscriptions.status, "CANCELED")))
+    .orderBy(desc(billingSubscriptions.updatedAt)).limit(1);
+  return row ?? null;
+}
+
 export type PayMethod = "CREDIT_CARD" | "UNDEFINED";
 const checkoutHost = () => (process.env.ASAAS_ENV === "production" ? "https://www.asaas.com" : "https://sandbox.asaas.com");
 const appUrl = () => (process.env.AUTH_URL || process.env.URL || "http://localhost:3000").replace(/\/$/, "");
@@ -93,12 +101,11 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
   const fresh = existing && Date.now() - existing.createdAt.getTime() < (CHECKOUT_MINUTES - 10) * 60_000;
   if (existing && existing.plan === plan && existing.status !== "ACTIVE" && existing.method === method && existing.lastInvoiceUrl && (method === "UNDEFINED" || fresh)) return existing.lastInvoiceUrl;
 
-  // o checkout com cartão exige o celular do cliente no Asaas (não guardamos aqui)
+  // Cartão: a própria página do Asaas pede CPF, celular e endereço do pagador (o checkout recusa
+  // clientes com cadastro incompleto). Por isso não mandamos "customer"; a assinatura é ligada pelo webhook.
   const phone = cleanPhone(phoneRaw);
-  if (method === "CREDIT_CARD" && !phone) throw new AppError(400, "Informe um celular válido com DDD, ex.: (21) 99999-0000.", "invalid_phone");
-
   let customerId = user.asaasCustomerId;
-  if (!customerId) {
+  if (method === "UNDEFINED" && !customerId) {
     const cpfCnpj = cleanCpfCnpj(cpfCnpjRaw);
     if (!cpfCnpj) throw new AppError(400, "CPF ou CNPJ inválido. Confira os números.", "invalid_document");
     const c = await asaas<{ id: string }>("/customers", {
@@ -106,8 +113,6 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
     });
     customerId = c.id;
     await db.update(users).set({ asaasCustomerId: customerId }).where(eq(users.id, user.id));
-  } else if (phone) {
-    await asaas(`/customers/${customerId}`, { method: "PUT", body: { phone, mobilePhone: phone } });
   }
 
   // trocou de plano ou de forma de pagamento (e não está ativa): encerra a cobrança anterior
@@ -123,7 +128,7 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
       method: "POST",
       body: {
         billingTypes: ["CREDIT_CARD"], chargeTypes: ["RECURRENT"], minutesToExpire: CHECKOUT_MINUTES,
-        customer: customerId, externalReference: `${user.id}:${plan}`,
+        externalReference: `${user.id}:${plan}`,
         callback: { successUrl: `${appUrl()}/planos?pago=1`, cancelUrl: `${appUrl()}/planos`, expiredUrl: `${appUrl()}/planos` },
         items: [{ name: `Meu Organiza ${PLANS[plan].name}`, description: "Assinatura mensal com cobrança automática no cartão", quantity: 1, value }],
         subscription: { cycle: "MONTHLY", nextDueDate: `${today} 00:00:00`, endDate: `${addMonths(today, 120)} 00:00:00` },
@@ -167,10 +172,12 @@ export async function cancelBilling(db: DB, user: User, opts: { immediate?: bool
 
 type AsaasEvent = {
   id: string; event: string;
-  payment?: { id: string; subscription?: string; customer?: string; dueDate?: string; invoiceUrl?: string; status?: string; externalReference?: string | null; billingType?: string };
-  subscription?: { id: string; customer?: string; externalReference?: string | null };
+  payment?: { id: string; subscription?: string; customer?: string; dueDate?: string; invoiceUrl?: string; status?: string; externalReference?: string | null; billingType?: string; checkoutSession?: string | null };
+  subscription?: { id: string; customer?: string; externalReference?: string | null; checkoutSession?: string | null };
   checkout?: { id: string; customer?: string | null; externalReference?: string | null };
 };
+
+const refUser = (ref?: string | null) => (ref && /^[\w-]+:(PREMIUM|FAMILY)$/.test(ref) ? ref.split(":")[0] : null);
 
 /**
  * Assinatura criada pelo checkout de cartão: o id dela só aparece no webhook.
@@ -178,13 +185,30 @@ type AsaasEvent = {
  */
 async function linkCheckoutSubscription(db: DB, ev: AsaasEvent, subId: string) {
   const customer = ev.payment?.customer ?? ev.subscription?.customer ?? ev.checkout?.customer ?? null;
-  const ref = ev.payment?.externalReference ?? ev.subscription?.externalReference ?? null;
-  let userId: string | null = ref && /^[\w-]+:(PREMIUM|FAMILY)$/.test(ref) ? ref.split(":")[0] : null;
+  // 1) externalReference "userId:plano"
+  let userId: string | null = refUser(ev.payment?.externalReference) ?? refUser(ev.subscription?.externalReference);
+  // 2) cliente do Asaas já conhecido
   if (!userId && customer) {
     const [u] = await db.select({ id: users.id }).from(users).where(eq(users.asaasCustomerId, customer)).limit(1);
     userId = u?.id ?? null;
   }
+  // 3) id do checkout que gerou a cobrança
+  const checkoutId = ev.payment?.checkoutSession ?? ev.subscription?.checkoutSession ?? null;
+  if (!userId && checkoutId) {
+    const [row] = await db.select({ userId: billingSubscriptions.userId }).from(billingSubscriptions).where(eq(billingSubscriptions.providerSubscriptionId, `checkout:${checkoutId}`)).limit(1);
+    userId = row?.userId ?? null;
+  }
+  // 4) e-mail que a pessoa digitou no checkout (busca o cliente no Asaas)
+  if (!userId && customer && billingEnabled()) {
+    const c = await asaas<{ email?: string | null }>(`/customers/${customer}`).catch(() => null);
+    const email = c?.email?.trim().toLowerCase();
+    if (email) {
+      const [u] = await db.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
+      userId = u?.id ?? null;
+    }
+  }
   if (!userId) return null;
+  if (customer) await db.update(users).set({ asaasCustomerId: customer }).where(eq(users.id, userId)); // quem pagou é o cliente que vale
   const [pending] = await db.select().from(billingSubscriptions)
     .where(and(eq(billingSubscriptions.userId, userId), like(billingSubscriptions.providerSubscriptionId, "checkout:%"), ne(billingSubscriptions.status, "CANCELED")))
     .orderBy(desc(billingSubscriptions.createdAt)).limit(1);
@@ -200,6 +224,18 @@ export async function handleAsaasEvent(db: DB, ev: AsaasEvent): Promise<"duplica
   if (!inserted.length) {
     const [prev] = await db.select().from(billingEvents).where(eq(billingEvents.id, ev.id));
     if (prev?.processedAt) return "duplicate";
+  }
+  // eventos do próprio checkout: expirou/cancelou sem pagar, ou foi pago (guarda o cliente criado lá)
+  if (ev.checkout?.id && ev.event.startsWith("CHECKOUT_")) {
+    const [row] = await db.select().from(billingSubscriptions).where(eq(billingSubscriptions.providerSubscriptionId, `checkout:${ev.checkout.id}`)).limit(1);
+    if (row && (ev.event === "CHECKOUT_EXPIRED" || ev.event === "CHECKOUT_CANCELED") && row.status === "PENDING") {
+      await db.update(billingSubscriptions).set({ status: "CANCELED" }).where(eq(billingSubscriptions.id, row.id));
+    }
+    if (row && ev.checkout.customer) {
+      await db.update(users).set({ asaasCustomerId: ev.checkout.customer }).where(eq(users.id, row.userId));
+    }
+    await db.update(billingEvents).set({ processedAt: new Date() }).where(eq(billingEvents.id, ev.id));
+    return row ? "processed" : "ignored";
   }
   const subId = ev.payment?.subscription ?? ev.subscription?.id;
   let [b] = subId ? await db.select().from(billingSubscriptions).where(eq(billingSubscriptions.providerSubscriptionId, subId)).limit(1) : [];

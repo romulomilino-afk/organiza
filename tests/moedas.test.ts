@@ -82,25 +82,26 @@ test("Asaas: assinatura com cartão (checkout recorrente) é ligada pelo webhook
   }) as typeof fetch;
 
   const u = await mk("cartao@x.com", "FREE");
-  await assert.rejects(() => startCheckout(db, u, "PREMIUM", "529.982.247-25", "CREDIT_CARD", "123"), /celular/);
-  const link = await startCheckout(db, u, "PREMIUM", "529.982.247-25", "CREDIT_CARD", "+55 (21) 99876-5432");
+  const link = await startCheckout(db, u, "PREMIUM", "", "CREDIT_CARD");
   assert.equal(link, "https://sandbox.asaas.com/checkoutSession/show?id=co_9");
-  assert.equal(calls.find((c) => c.url.endsWith("/customers"))!.body.mobilePhone, "21998765432", "o Asaas exige o celular do cliente no checkout");
+  assert.equal(calls.filter((c) => c.url.includes("/customers")).length, 0, "no cartão quem preenche CPF, celular e endereço é a pessoa, na página do Asaas");
   const co = calls.find((c) => c.url.endsWith("/checkouts"))!;
-  assert.deepEqual([co.body.billingTypes, co.body.chargeTypes, co.body.customer], [["CREDIT_CARD"], ["RECURRENT"], "cus_123"]);
+  assert.deepEqual([co.body.billingTypes, co.body.chargeTypes, co.body.customer, co.body.customerData], [["CREDIT_CARD"], ["RECURRENT"], undefined, undefined]);
+  assert.equal(co.body.externalReference, `${u.id}:PREMIUM`);
   assert.equal((co.body.callback as Record<string, string>).successUrl, "https://meuorganiza.com.br/planos?pago=1");
   assert.equal((co.body.subscription as Record<string, string>).cycle, "MONTHLY");
 
   let [row] = await db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, u.id));
   assert.deepEqual([row.providerSubscriptionId, row.method, row.status], ["checkout:co_9", "CREDIT_CARD", "PENDING"]);
 
-  // o Asaas cria a assinatura e cobra o cartão: o webhook liga e ativa
-  await handleAsaasEvent(db, { id: "evt_sub", event: "SUBSCRIPTION_CREATED", subscription: { id: "sub_77", customer: "cus_123" } });
+  // o Asaas cria a assinatura e cobra o cartão: o webhook liga (pelo id do checkout) e ativa
+  await handleAsaasEvent(db, { id: "evt_sub", event: "SUBSCRIPTION_CREATED", subscription: { id: "sub_77", customer: "cus_123", checkoutSession: "co_9" } });
   await handleAsaasEvent(db, { id: "evt_pay", event: "PAYMENT_CONFIRMED", payment: { id: "pay_1", subscription: "sub_77", customer: "cus_123", dueDate: "2026-10-05", billingType: "CREDIT_CARD" } });
   [row] = await db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, u.id));
   assert.deepEqual([row.providerSubscriptionId, row.status, row.currentPeriodEnd], ["sub_77", "ACTIVE", "2026-11-05"]);
   const [me] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
   assert.equal(me.plan, "PREMIUM");
+  assert.equal(me.asaasCustomerId, "cus_123", "guarda o cliente criado no checkout");
 
   // mês seguinte: cobrança automática chega direto pela assinatura
   await handleAsaasEvent(db, { id: "evt_pay2", event: "PAYMENT_CONFIRMED", payment: { id: "pay_2", subscription: "sub_77", customer: "cus_123", dueDate: "2026-11-05" } });
@@ -109,23 +110,42 @@ test("Asaas: assinatura com cartão (checkout recorrente) é ligada pelo webhook
 });
 
 test("Asaas: pagamento confirmado sem o evento de assinatura também liga; checkout pendente cancelado não rebaixa quem tem acesso liberado", async () => {
-  globalThis.fetch = (async (url: string) => new Response(JSON.stringify(String(url).endsWith("/checkouts") ? { id: "co_x", link: "https://sandbox.asaas.com/c/co_x" } : { id: "cus_456" }), { status: 200 })) as typeof fetch;
+  // sem externalReference nem id do checkout: acha a pessoa pelo e-mail que ela digitou no Asaas
+  globalThis.fetch = (async (url: string) => new Response(JSON.stringify(String(url).endsWith("/checkouts") ? { id: "co_x", link: "https://sandbox.asaas.com/c/co_x" } : { id: "cus_456", email: "Direto@X.com" }), { status: 200 })) as typeof fetch;
   const u = await mk("direto@x.com", "FREE");
-  await startCheckout(db, u, "FAMILY", "529.982.247-25", "CREDIT_CARD", "21998765432");
+  await startCheckout(db, u, "FAMILY", "", "CREDIT_CARD");
   await handleAsaasEvent(db, { id: "evt_d1", event: "PAYMENT_CONFIRMED", payment: { id: "p", subscription: "sub_88", customer: "cus_456", dueDate: "2026-10-05" } });
   const [me] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
   assert.equal(me.plan, "FAMILY");
 
   const vip = await mk("vip@x.com", "FAMILY"); // acesso liberado manualmente
   await db.update(schema.users).set({ asaasCustomerId: "cus_vip" }).where(eq(schema.users.id, vip.id));
-  const vipCalls: { url: string; body: Record<string, unknown> }[] = [];
-  globalThis.fetch = (async (url: string, init?: RequestInit) => { vipCalls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : {} }); return new Response(JSON.stringify({ id: "co_v" }), { status: 200 }); }) as typeof fetch;
-  await startCheckout(db, (await db.select().from(schema.users).where(eq(schema.users.id, vip.id)))[0], "PREMIUM", "", "CREDIT_CARD", "(11) 3456-7890");
-  const upd = vipCalls.find((c) => c.url.endsWith("/customers/cus_vip"))!;
-  assert.equal(upd.body.mobilePhone, "1134567890", "cliente que já existia no Asaas ganha o celular antes do checkout");
+  globalThis.fetch = (async () => new Response(JSON.stringify({ id: "co_v" }), { status: 200 })) as typeof fetch;
+  await startCheckout(db, (await db.select().from(schema.users).where(eq(schema.users.id, vip.id)))[0], "PREMIUM", "", "CREDIT_CARD");
   await cancelBilling(db, vip);
   const [v] = await db.select().from(schema.users).where(eq(schema.users.id, vip.id));
   assert.equal(v.plan, "FAMILY", "cancelar um checkout que nunca foi pago não tira o acesso");
+});
+
+test("Asaas: checkout que expira sem pagar é encerrado; cancelar assinatura ativa mantém o acesso até o fim do mês pago", async () => {
+  process.env.ASAAS_API_KEY = "teste";
+  let n = 0;
+  globalThis.fetch = (async (url: string) => new Response(JSON.stringify(String(url).endsWith("/checkouts") ? { id: n++ ? `co_e${n}` : "co_e" } : {}), { status: 200 })) as typeof fetch;
+  const u = await mk("expira@x.com", "FREE");
+  await startCheckout(db, u, "PREMIUM", "", "CREDIT_CARD");
+  await handleAsaasEvent(db, { id: "evt_e1", event: "CHECKOUT_EXPIRED", checkout: { id: "co_e" } });
+  let [row] = await db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, u.id));
+  assert.equal(row.status, "CANCELED");
+
+  await startCheckout(db, u, "PREMIUM", "", "CREDIT_CARD");
+  await handleAsaasEvent(db, { id: "evt_e2", event: "PAYMENT_CONFIRMED", payment: { id: "pe", subscription: "sub_e", customer: "cus_e", dueDate: todayIn(TZ), externalReference: `${u.id}:PREMIUM` } });
+  let [me] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
+  assert.equal(me.plan, "PREMIUM");
+  await cancelBilling(db, me);
+  [me] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
+  assert.equal(me.plan, "PREMIUM", "pagou o mês: continua até o fim do período");
+  const rows = await db.select().from(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.userId, u.id));
+  assert.ok(rows.every((r) => r.status === "CANCELED"));
 });
 
 test("trocar a moeda da Nina pela conversa: pergunta se converte e aplica a resposta", async () => {

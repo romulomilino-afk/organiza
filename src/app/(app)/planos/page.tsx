@@ -4,7 +4,9 @@ import { PLANS, type PlanId } from "@/lib/plans";
 import { brl } from "@/lib/money";
 import { fmtBR } from "@/lib/dates";
 import { billingEnabled, currentBilling } from "@/lib/billing";
-import { cancelAction } from "@/actions/billing";
+import { todayIn } from "@/lib/dates";
+import { CancelSubscription } from "@/components/CancelSubscription";
+import { lastCanceled } from "@/lib/billing";
 import { CheckoutForm } from "@/components/CheckoutForm";
 import { PageHeader } from "@/components/ui";
 
@@ -14,10 +16,12 @@ const FEATURES: Record<PlanId, string[]> = {
   FAMILY: ["Tudo do Premium", "Até 5 pessoas", "Agenda e tarefas compartilhadas", "Lista de compras da família", "Financeiro compartilhado (opcional)"],
 };
 
-export default async function PlanosPage({ searchParams }: { searchParams: Promise<{ pago?: string }> }) {
+export default async function PlanosPage({ searchParams }: { searchParams: Promise<{ pago?: string; cancelada?: string }> }) {
   const sp = await searchParams;
   const { user, access } = await requirePageAccess();
   const billing = await currentBilling(getDb(), user.id);
+  const canceled = !billing ? await lastCanceled(getDb(), user.id) : null;
+  const stillUntil = canceled?.currentPeriodEnd && canceled.currentPeriodEnd >= todayIn(user.timezone) && user.plan !== "FREE" ? canceled.currentPeriodEnd : null;
   const enabled = billingEnabled();
   const inherited = access.plan !== access.ownPlan;
   const mine = user.plan as PlanId; // plano assinado (o teste grátis não conta aqui)
@@ -31,6 +35,8 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
       )}
       {inTrial && <p className="card mb-3 bg-accent-soft text-[15px]">🎁 Você está no teste grátis de 7 dias com todas as funções. Depois dele, a conta volta para o Grátis (só agenda, tarefas e compras). Assine agora e continue sem interrupção.</p>}
       {access.trial && !access.trial.active && mine === "FREE" && !inherited && <p className="card mb-3 bg-bad-soft text-[15px]"><b>Seu teste grátis acabou.</b> Escolha o Premium ou o Família para liberar de novo o financeiro, os cartões, o áudio, os documentos e o WhatsApp. Seus dados continuam guardados.</p>}
+      {sp.cancelada && <p className="card mb-3 text-[15px]">✅ Pronto, a assinatura foi cancelada. Não haverá novas cobranças.</p>}
+      {stillUntil && <p className="card mb-3 text-[15px]">Sua assinatura do <b>{PLANS[canceled!.plan as PlanId].name}</b> foi cancelada. Você continua com acesso até <b>{fmtBR(stillUntil)}</b>. Se mudar de ideia, é só assinar de novo.</p>}
       {user.currency !== "BRL" && <p className="mb-3 text-[13px] text-ink-3">Os planos são cobrados em reais (R$).</p>}
       {billing && (
         <div className="card mb-3 flex flex-col gap-2">
@@ -46,7 +52,7 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
             <a href={billing.lastInvoiceUrl} target="_blank" rel="noopener noreferrer" className="btn w-fit">{billing.method === "CREDIT_CARD" && billing.status === "PENDING" ? "Concluir pagamento com cartão" : "Pagar"}</a>
           )}
           {billing.status === "OVERDUE" && <p className="text-sm text-bad">Pague em até 7 dias para não perder os recursos do plano.</p>}
-          <form action={cancelAction}><button className="text-sm font-semibold text-ink-3 underline">Cancelar assinatura</button></form>
+          <CancelSubscription planName={PLANS[billing.plan as PlanId].name} until={billing.status === "ACTIVE" && billing.currentPeriodEnd ? fmtBR(billing.currentPeriodEnd) : null} pendingOnly={billing.status === "PENDING"} />
         </div>
       )}
       {!enabled && <p className="card mb-3 text-sm text-ink-2">Pagamentos ainda não configurados neste servidor (ASAAS_API_KEY).</p>}
@@ -62,7 +68,7 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
               <ul className="flex flex-col gap-1 text-[15px] text-ink-2">{FEATURES[p].map((f) => <li key={f}>✓ {f}</li>)}</ul>
               {current ? <span className="pill pill-ok w-fit">{inTrial && p === "FREE" ? "Depois do teste" : "Seu plano"}</span>
                 : p !== "FREE" && enabled && !(billing?.status === "ACTIVE" && billing.plan === p) && (
-                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} needsDocument={!user.asaasCustomerId} phone={user.phone} />
+                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} />
                 )}
             </div>
           );
