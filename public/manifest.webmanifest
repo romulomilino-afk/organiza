@@ -1,6 +1,6 @@
 {
-  "name": "Organiza",
-  "short_name": "Organiza",
+  "name": "Meu Organiza",
+  "short_name": "Meu Organiza",
   "description": "Você fala. A gente organiza.",
   "id": "/",
   "start_url": "/",

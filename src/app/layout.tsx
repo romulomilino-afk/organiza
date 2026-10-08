@@ -9,12 +9,12 @@ import "./globals.css";
 import { RegisterSW } from "@/components/RegisterSW";
 
 export const metadata: Metadata = {
-  title: "Organiza",
+  title: "Meu Organiza",
   description: "Você fala. A gente organiza. Sua assistente pessoal, a Nina, cuida da sua agenda, tarefas, dinheiro e compras.",
-  applicationName: "Organiza",
+  applicationName: "Meu Organiza",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },
-  appleWebApp: { capable: true, title: "Organiza", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "Meu Organiza", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
