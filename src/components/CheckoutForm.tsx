@@ -3,7 +3,7 @@ import { useActionState, useState } from "react";
 import { checkoutAction, type CheckoutState } from "@/actions/billing";
 
 /** Pede CPF/CNPJ (exigência do Asaas para emitir a cobrança) e manda para a fatura. */
-export function CheckoutForm({ plan, label, needsDocument }: { plan: "PREMIUM" | "FAMILY"; label: string; needsDocument: boolean }) {
+export function CheckoutForm({ plan, label, needsDocument, phone }: { plan: "PREMIUM" | "FAMILY"; label: string; needsDocument: boolean; phone?: string | null }) {
   const [state, action, pending] = useActionState<CheckoutState, FormData>(checkoutAction, undefined);
   const [open, setOpen] = useState(false);
   if (!open) return <button className="btn w-full" onClick={() => setOpen(true)}>{label}</button>;
@@ -18,12 +18,16 @@ export function CheckoutForm({ plan, label, needsDocument }: { plan: "PREMIUM" |
       {needsDocument && (
         <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">CPF ou CNPJ
           <input name="doc" required inputMode="numeric" autoComplete="off" maxLength={18} placeholder="000.000.000-00" className="field font-normal" />
-          <span className="font-normal text-ink-3">Usado só para emitir a cobrança no Asaas. Não fica guardado no Organiza.</span>
+          <span className="font-normal text-ink-3">Usado só para emitir a cobrança no Asaas. Não fica guardado no Meu Organiza.</span>
         </label>
       )}
+      <label className="flex flex-col gap-1 text-sm font-semibold text-ink-2">Celular com DDD
+        <input name="phone" required type="tel" inputMode="tel" autoComplete="tel-national" maxLength={20} defaultValue={phone ? phone.replace(/^55/, "") : ""} placeholder="(21) 99999-0000" className="field font-normal" />
+        <span className="font-normal text-ink-3">O Asaas pede o celular para a cobrança no cartão.</span>
+      </label>
       {state?.error && <p role="alert" className="rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad">{state.error}</p>}
       <button disabled={pending} className="btn w-full">{pending ? "Abrindo pagamento…" : "Ir para o pagamento"}</button>
-      <p className="text-center text-xs text-ink-3">🔒 Você digita o cartão na página segura do Asaas. O Organiza não vê nem guarda os dados do cartão. Cancele quando quiser.</p>
+      <p className="text-center text-xs text-ink-3">🔒 Você digita o cartão na página segura do Asaas. O Meu Organiza não vê nem guarda os dados do cartão. Cancele quando quiser.</p>
     </form>
   );
 }

@@ -22,7 +22,7 @@ export function InviteButton() {
     try { await navigator.clipboard.writeText(link); setCopied(true); } catch { setCopied(false); }
   }
   async function share(link: string) {
-    if (navigator.share) await navigator.share({ title: "Organiza", text: "Entre na nossa família no Organiza:", url: link }).catch(() => {});
+    if (navigator.share) await navigator.share({ title: "Meu Organiza", text: "Entre na nossa família no Meu Organiza:", url: link }).catch(() => {});
     else copy(link);
   }
   return (

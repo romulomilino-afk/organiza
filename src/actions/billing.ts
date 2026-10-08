@@ -13,12 +13,12 @@ export type CheckoutState = { error?: string } | undefined;
 export async function checkoutAction(_prev: CheckoutState, form: FormData): Promise<CheckoutState> {
   const user = await requireUser();
   if (!rateLimit(`checkout:${user.id}`, 5, 10 * 60_000)) return { error: "Muitas tentativas. Espere alguns minutos." };
-  const parsed = z.object({ plan: z.enum(["PREMIUM", "FAMILY"]), doc: z.string().max(30).default("") })
-    .safeParse({ plan: form.get("plan"), doc: form.get("doc") ?? "" });
+  const parsed = z.object({ plan: z.enum(["PREMIUM", "FAMILY"]), doc: z.string().max(30).default(""), phone: z.string().max(30).default("") })
+    .safeParse({ plan: form.get("plan"), doc: form.get("doc") ?? "", phone: form.get("phone") ?? "" });
   if (!parsed.success) return { error: "Escolha um plano." };
   let url: string;
   try {
-    url = await startCheckout(getDb(), user, parsed.data.plan, parsed.data.doc, "CREDIT_CARD"); // só cartão, cobrança automática
+    url = await startCheckout(getDb(), user, parsed.data.plan, parsed.data.doc, "CREDIT_CARD", parsed.data.phone); // só cartão, cobrança automática
   } catch (e) {
     return { error: e instanceof AppError ? e.publicMessage : "Não consegui iniciar o pagamento agora." };
   }

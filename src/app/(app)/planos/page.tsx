@@ -62,7 +62,7 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
               <ul className="flex flex-col gap-1 text-[15px] text-ink-2">{FEATURES[p].map((f) => <li key={f}>✓ {f}</li>)}</ul>
               {current ? <span className="pill pill-ok w-fit">{inTrial && p === "FREE" ? "Depois do teste" : "Seu plano"}</span>
                 : p !== "FREE" && enabled && !(billing?.status === "ACTIVE" && billing.plan === p) && (
-                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} needsDocument={!user.asaasCustomerId} />
+                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} needsDocument={!user.asaasCustomerId} phone={user.phone} />
                 )}
             </div>
           );

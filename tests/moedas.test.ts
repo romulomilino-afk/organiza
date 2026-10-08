@@ -82,8 +82,10 @@ test("Asaas: assinatura com cartão (checkout recorrente) é ligada pelo webhook
   }) as typeof fetch;
 
   const u = await mk("cartao@x.com", "FREE");
-  const link = await startCheckout(db, u, "PREMIUM", "529.982.247-25", "CREDIT_CARD");
+  await assert.rejects(() => startCheckout(db, u, "PREMIUM", "529.982.247-25", "CREDIT_CARD", "123"), /celular/);
+  const link = await startCheckout(db, u, "PREMIUM", "529.982.247-25", "CREDIT_CARD", "+55 (21) 99876-5432");
   assert.equal(link, "https://sandbox.asaas.com/checkoutSession/show?id=co_9");
+  assert.equal(calls.find((c) => c.url.endsWith("/customers"))!.body.mobilePhone, "21998765432", "o Asaas exige o celular do cliente no checkout");
   const co = calls.find((c) => c.url.endsWith("/checkouts"))!;
   assert.deepEqual([co.body.billingTypes, co.body.chargeTypes, co.body.customer], [["CREDIT_CARD"], ["RECURRENT"], "cus_123"]);
   assert.equal((co.body.callback as Record<string, string>).successUrl, "https://meuorganiza.com.br/planos?pago=1");
@@ -109,15 +111,18 @@ test("Asaas: assinatura com cartão (checkout recorrente) é ligada pelo webhook
 test("Asaas: pagamento confirmado sem o evento de assinatura também liga; checkout pendente cancelado não rebaixa quem tem acesso liberado", async () => {
   globalThis.fetch = (async (url: string) => new Response(JSON.stringify(String(url).endsWith("/checkouts") ? { id: "co_x", link: "https://sandbox.asaas.com/c/co_x" } : { id: "cus_456" }), { status: 200 })) as typeof fetch;
   const u = await mk("direto@x.com", "FREE");
-  await startCheckout(db, u, "FAMILY", "529.982.247-25");
+  await startCheckout(db, u, "FAMILY", "529.982.247-25", "CREDIT_CARD", "21998765432");
   await handleAsaasEvent(db, { id: "evt_d1", event: "PAYMENT_CONFIRMED", payment: { id: "p", subscription: "sub_88", customer: "cus_456", dueDate: "2026-10-05" } });
   const [me] = await db.select().from(schema.users).where(eq(schema.users.id, u.id));
   assert.equal(me.plan, "FAMILY");
 
   const vip = await mk("vip@x.com", "FAMILY"); // acesso liberado manualmente
   await db.update(schema.users).set({ asaasCustomerId: "cus_vip" }).where(eq(schema.users.id, vip.id));
-  globalThis.fetch = (async () => new Response(JSON.stringify({ id: "co_v" }), { status: 200 })) as typeof fetch;
-  await startCheckout(db, (await db.select().from(schema.users).where(eq(schema.users.id, vip.id)))[0], "PREMIUM", "");
+  const vipCalls: { url: string; body: Record<string, unknown> }[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => { vipCalls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : {} }); return new Response(JSON.stringify({ id: "co_v" }), { status: 200 }); }) as typeof fetch;
+  await startCheckout(db, (await db.select().from(schema.users).where(eq(schema.users.id, vip.id)))[0], "PREMIUM", "", "CREDIT_CARD", "(11) 3456-7890");
+  const upd = vipCalls.find((c) => c.url.endsWith("/customers/cus_vip"))!;
+  assert.equal(upd.body.mobilePhone, "1134567890", "cliente que já existia no Asaas ganha o celular antes do checkout");
   await cancelBilling(db, vip);
   const [v] = await db.select().from(schema.users).where(eq(schema.users.id, vip.id));
   assert.equal(v.plan, "FAMILY", "cancelar um checkout que nunca foi pago não tira o acesso");

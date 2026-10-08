@@ -75,8 +75,17 @@ const checkoutHost = () => (process.env.ASAAS_ENV === "production" ? "https://ww
 const appUrl = () => (process.env.AUTH_URL || process.env.URL || "http://localhost:3000").replace(/\/$/, "");
 const CHECKOUT_MINUTES = 60;
 
+/** Celular brasileiro com DDD (10 ou 11 dígitos, aceita +55). Retorna só os dígitos sem o 55, ou null. */
+export function cleanPhone(input: string): string | null {
+  let d = input.replace(/\D/g, "");
+  if (d.length >= 12 && d.startsWith("55")) d = d.slice(2);
+  if (d.length !== 10 && d.length !== 11) return null;
+  if (/^(\d)\1+$/.test(d) || Number(d.slice(0, 2)) < 11) return null;
+  return d;
+}
+
 /** Cria (ou reaproveita) a cobrança e devolve o link de pagamento do Asaas. */
-export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMILY", cpfCnpjRaw: string, method: PayMethod = "CREDIT_CARD"): Promise<string> {
+export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMILY", cpfCnpjRaw: string, method: PayMethod = "CREDIT_CARD", phoneRaw = ""): Promise<string> {
   if (!billingEnabled()) throw new AppError(501, "Pagamentos ainda não configurados.", "not_configured");
   const existing = await currentBilling(db, user.id);
   if (existing && existing.plan === plan && existing.status === "ACTIVE") throw new AppError(409, `Você já assina o ${PLANS[plan].name}.`, "already_active");
@@ -84,15 +93,21 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
   const fresh = existing && Date.now() - existing.createdAt.getTime() < (CHECKOUT_MINUTES - 10) * 60_000;
   if (existing && existing.plan === plan && existing.status !== "ACTIVE" && existing.method === method && existing.lastInvoiceUrl && (method === "UNDEFINED" || fresh)) return existing.lastInvoiceUrl;
 
+  // o checkout com cartão exige o celular do cliente no Asaas (não guardamos aqui)
+  const phone = cleanPhone(phoneRaw);
+  if (method === "CREDIT_CARD" && !phone) throw new AppError(400, "Informe um celular válido com DDD, ex.: (21) 99999-0000.", "invalid_phone");
+
   let customerId = user.asaasCustomerId;
   if (!customerId) {
     const cpfCnpj = cleanCpfCnpj(cpfCnpjRaw);
     if (!cpfCnpj) throw new AppError(400, "CPF ou CNPJ inválido. Confira os números.", "invalid_document");
     const c = await asaas<{ id: string }>("/customers", {
-      method: "POST", body: { name: user.name || user.email, email: user.email, cpfCnpj, externalReference: user.id, notificationDisabled: false },
+      method: "POST", body: { name: user.name || user.email, email: user.email, cpfCnpj, ...(phone ? { phone, mobilePhone: phone } : {}), externalReference: user.id, notificationDisabled: false },
     });
     customerId = c.id;
     await db.update(users).set({ asaasCustomerId: customerId }).where(eq(users.id, user.id));
+  } else if (phone) {
+    await asaas(`/customers/${customerId}`, { method: "PUT", body: { phone, mobilePhone: phone } });
   }
 
   // trocou de plano ou de forma de pagamento (e não está ativa): encerra a cobrança anterior
@@ -110,7 +125,7 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
         billingTypes: ["CREDIT_CARD"], chargeTypes: ["RECURRENT"], minutesToExpire: CHECKOUT_MINUTES,
         customer: customerId, externalReference: `${user.id}:${plan}`,
         callback: { successUrl: `${appUrl()}/planos?pago=1`, cancelUrl: `${appUrl()}/planos`, expiredUrl: `${appUrl()}/planos` },
-        items: [{ name: `Organiza ${PLANS[plan].name}`, description: "Assinatura mensal com cobrança automática no cartão", quantity: 1, value }],
+        items: [{ name: `Meu Organiza ${PLANS[plan].name}`, description: "Assinatura mensal com cobrança automática no cartão", quantity: 1, value }],
         subscription: { cycle: "MONTHLY", nextDueDate: `${today} 00:00:00`, endDate: `${addMonths(today, 120)} 00:00:00` },
       },
     });
@@ -121,7 +136,7 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
       method: "POST",
       body: {
         customer: customerId, billingType: "UNDEFINED", value, cycle: "MONTHLY",
-        nextDueDate: today, description: `Organiza ${PLANS[plan].name}`, externalReference: `${user.id}:${plan}`,
+        nextDueDate: today, description: `Meu Organiza ${PLANS[plan].name}`, externalReference: `${user.id}:${plan}`,
       },
     });
     const pays = await asaas<{ data: { invoiceUrl: string }[] }>(`/subscriptions/${sub.id}/payments`);
