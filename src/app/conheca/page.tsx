@@ -2,7 +2,16 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { PLANS } from "@/lib/plans";
 import { brl } from "@/lib/money";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { InstallApp } from "@/components/InstallApp";
+
+// vídeo de apresentação: aparece só se o arquivo existir em public/videos (verificado no build)
+const VIDEO = "/videos/apresentacao.mp4";
+const POSTER = "/videos/apresentacao-capa.jpg";
+const pub = (f: string) => path.join(process.cwd(), "public", f);
+const hasVideo = existsSync(pub(VIDEO));
+const hasPoster = existsSync(pub(POSTER));
 
 export const metadata: Metadata = {
   title: "Meu Organiza · Você fala. A gente organiza.",
@@ -82,7 +91,7 @@ export default function ConhecaPage() {
               <p className="max-w-xl text-[19px] leading-relaxed" style={{ color: M }}>Conte para a Nina o que gastou, o que precisa pagar e o que tem para fazer. Ela organiza seu dinheiro, suas contas e seu dia, por texto, áudio ou WhatsApp.</p>
               <div className="flex flex-wrap gap-3">
                 <Link href="/cadastro" className="rounded-2xl px-7 py-4 text-[17px] font-bold" style={{ background: Y, color: N }}>Testar 7 dias grátis</Link>
-                <a href="#como-funciona" className="rounded-2xl border px-7 py-4 text-[17px] font-semibold" style={{ borderColor: "rgba(246,245,240,.35)", color: C }}>Ver como funciona</a>
+                <a href={hasVideo ? "#video" : "#como-funciona"} className="rounded-2xl border px-7 py-4 text-[17px] font-semibold" style={{ borderColor: "rgba(246,245,240,.35)", color: C }}>{hasVideo ? "▶ Ver o vídeo" : "Ver como funciona"}</a>
               </div>
               <p className="text-[14px]" style={{ color: M }}>Sem cartão para testar · Cancele quando quiser</p>
             </div>
@@ -103,6 +112,32 @@ export default function ConhecaPage() {
             </div>
           </div>
         </section>
+
+        {/* vídeo */}
+        {hasVideo && (
+          <section id="video" className="scroll-mt-20" style={{ background: "#ECEAE3" }}>
+            <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:px-6 md:grid-cols-[1fr_auto]">
+              <div>
+                <p className="text-[14px] font-bold uppercase tracking-[3px]" style={{ color: G }}>Veja como funciona</p>
+                <h2 className="mt-2 font-display text-[36px] font-extrabold leading-tight sm:text-[46px]">O Meu Organiza<br />em poucos segundos.</h2>
+                <p className="mt-4 max-w-xl text-[18px] leading-relaxed" style={{ color: B }}>Dê o play e veja a Nina organizando gastos, contas e compromissos, só conversando.</p>
+                <Link href="/cadastro" className="mt-6 inline-block rounded-2xl px-7 py-4 text-[17px] font-bold" style={{ background: G, color: C }}>Testar 7 dias grátis</Link>
+              </div>
+              <div className="mx-auto w-full max-w-[340px] rounded-[36px] p-2.5 shadow-2xl" style={{ background: "#08201A" }}>
+                <video
+                  src={hasPoster ? VIDEO : `${VIDEO}#t=0.5`}
+                  poster={hasPoster ? POSTER : undefined}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="block w-full rounded-[28px]"
+                  style={{ aspectRatio: "9 / 16", background: N, objectFit: "cover" }}
+                  aria-label="Vídeo de apresentação do Meu Organiza"
+                />
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* como funciona */}
         <section id="como-funciona" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">

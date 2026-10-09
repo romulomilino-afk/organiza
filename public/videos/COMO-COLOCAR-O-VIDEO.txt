@@ -1,0 +1,7 @@
+Coloque aqui o vídeo de apresentação com o nome exato:
+
+    apresentacao.mp4
+
+Ele aparece sozinho no site (seção "Veja como funciona") no próximo deploy.
+Dicas: formato MP4, de preferência com menos de 20 MB.
+Opcional: uma imagem de capa com o nome apresentacao-capa.jpg (mostrada antes do play).
