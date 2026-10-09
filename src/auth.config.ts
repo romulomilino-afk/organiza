@@ -1,10 +1,11 @@
 import type { NextAuthConfig } from "next-auth";
+import { NextResponse } from "next/server";
 
 /**
  * Parte da configuração que roda no middleware (Edge): sem banco, sem bcrypt.
  */
 // Webhooks e cron têm autenticação própria (assinatura/segredo), não sessão.
-const PUBLIC = ["/login", "/cadastro", "/privacidade", "/excluir-conta", "/.well-known", "/api/auth", "/api/register", "/api/cron", "/api/webhooks"];
+const PUBLIC = ["/conheca", "/login", "/cadastro", "/privacidade", "/excluir-conta", "/.well-known", "/api/auth", "/api/register", "/api/cron", "/api/webhooks"];
 
 export const authConfig = {
   pages: { signIn: "/login" },
@@ -15,6 +16,8 @@ export const authConfig = {
       const { pathname } = request.nextUrl;
       const isPublic = PUBLIC.some((p) => pathname === p || pathname.startsWith(p + "/"));
       if (isPublic) return true;
+      // visitante na página inicial vê o site de apresentação; quem está logado vê o app
+      if (pathname === "/" && !auth?.user) return NextResponse.rewrite(new URL("/conheca", request.nextUrl));
       return !!auth?.user;
     },
     jwt({ token, user }) {
