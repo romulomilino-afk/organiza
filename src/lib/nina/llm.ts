@@ -10,13 +10,37 @@ export function llmEnabled() {
   return !!process.env.ANTHROPIC_API_KEY;
 }
 
+const FAST_DEFAULT = "claude-haiku-4-5-20251001";
+const SMART_DEFAULT = "claude-sonnet-5-5";
+
+/** Pedido "difícil": longo, com várias coisas juntas, áudio transcrito ou pergunta de análise/planejamento. */
+export function isComplex(text: string, source: "TEXT" | "VOICE" = "TEXT"): boolean {
+  if (source === "VOICE") return true;
+  if (text.length > 160) return true;
+  const parts = text.split(/[,;\n]|\s(?:e depois|depois|também|e também)\s/i).filter((p) => p.trim().length > 3);
+  if (parts.length >= 3) return true;
+  return /(planej|analis|anális|resum|compar|dica|conselho|economiz|quanto (gastei|sobra|sobrou|posso)|posso (gastar|comprar)|vale a pena|me ajud)/i.test(text);
+}
+
+/**
+ * Modelos na ordem de tentativa. Rápido e barato (Haiku) para o dia a dia; o mais esperto (Sonnet)
+ * para pedidos difíceis. Se o primeiro falhar (limite, instabilidade), tenta o outro antes do modo simples.
+ * NINA_MODEL troca o rápido; NINA_MODEL_SMART troca o esperto ("off" desliga).
+ */
+export function chooseModels(text: string, source: "TEXT" | "VOICE" = "TEXT"): string[] {
+  const fast = process.env.NINA_MODEL?.trim() || FAST_DEFAULT;
+  const smartEnv = process.env.NINA_MODEL_SMART?.trim();
+  const smart = smartEnv === "off" ? null : smartEnv || SMART_DEFAULT;
+  if (!smart || smart === fast) return [fast];
+  return isComplex(text, source) ? [smart, fast] : [fast, smart];
+}
+
 /**
  * Chama o Claude com saída estruturada forçada (ferramenta "organizar").
  * Retorna o objeto bruto da ferramenta; a validação acontece em actions.ts.
  */
-export async function callNina(history: Turn[], contextJson: string, message: string): Promise<unknown> {
-  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 30_000 });
-  const model = process.env.NINA_MODEL || "claude-haiku-4-5-20251001";
+export async function callNina(history: Turn[], contextJson: string, message: string, model: string = chooseModels(message)[0]): Promise<unknown> {
+  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 25_000 });
 
   // histórico curto, alternando papéis (turnos consecutivos do mesmo papel são unidos)
   const msgs: Turn[] = [];

@@ -8,7 +8,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { messages, usageCounters, type User } from "@/db/schema";
 import { buildContext } from "./context";
-import { callNina, llmEnabled, type Turn } from "./llm";
+import { callNina, chooseModels, llmEnabled, type Turn } from "./llm";
 import { fallbackNina } from "./fallback";
 import { parseNinaOutput, type Action, type Suggestion } from "./actions";
 import { executeActions, type Card } from "./executor";
@@ -89,15 +89,20 @@ async function handleMessageInner(db: DB, user: User, text: string, source: "TEX
 
   let mode: "ai" | "rules" = "rules";
   let out;
-  try {
-    if (llmEnabled()) {
-      const ctx = await buildContext(db, user, access, today);
-      const turns: Turn[] = history.map((m) => ({ role: m.role === "USER" ? "user" : "assistant", content: m.content }));
-      out = parseNinaOutput(await callNina(turns, JSON.stringify(ctx), text));
-      mode = "ai";
+  if (llmEnabled()) {
+    let ctxJson: string | null = null;
+    const turns: Turn[] = history.map((m) => ({ role: m.role === "USER" ? "user" : "assistant", content: m.content }));
+    // tenta o modelo mais indicado; se falhar (limite, instabilidade, resposta inválida), o outro; depois o modo simples
+    for (const model of chooseModels(text, source)) {
+      try {
+        ctxJson ??= JSON.stringify(await buildContext(db, user, access, today));
+        out = parseNinaOutput(await callNina(turns, ctxJson, text, model));
+        mode = "ai";
+        break;
+      } catch (e) {
+        log.error("nina.llm_failed", { userId: user.id, model, error: e as Error });
+      }
     }
-  } catch (e) {
-    log.error("nina.llm_failed", { userId: user.id, error: e as Error });
   }
   if (!out) {
     const lastA = [...history].reverse().find((m) => m.role === "ASSISTANT");

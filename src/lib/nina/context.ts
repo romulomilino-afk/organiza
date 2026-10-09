@@ -109,7 +109,8 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
       despesas: fin.expenseCents / 100,
       saldo: fin.balanceCents / 100,
       gastos_hoje: fin.todayCents / 100,
-      por_categoria: Object.fromEntries(Object.entries(fin.byCategory).map(([k, v]) => [k, v / 100])),
+      // já em ordem do maior para o menor gasto (a Nina cita na mesma ordem)
+      por_categoria_maior_para_menor: Object.entries(fin.byCategory).sort((x, y) => y[1] - x[1]).map(([k, v]) => ({ categoria: k, total: v / 100 })),
       ultimos: fin.expenses.slice(0, 12).map((e) => ({ description: e.description, amount: (e.amountCents ?? 0) / 100, category: e.categoryKey, date: e.date })),
     },
   };

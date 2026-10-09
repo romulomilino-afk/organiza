@@ -15,7 +15,8 @@
     "setup": "npm run db:up && npm run db:migrate",
     "test": "tsx --test tests/*.test.ts",
     "worker": "tsx src/worker.ts",
-    "secrets": "tsx scripts/secrets.ts"
+    "secrets": "tsx scripts/secrets.ts",
+    "teste:carga": "node scripts/teste-carga.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",
