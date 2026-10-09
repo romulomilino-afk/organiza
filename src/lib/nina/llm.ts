@@ -6,6 +6,8 @@ import { log } from "../logger";
 export type Turn = { role: "user" | "assistant"; content: string };
 
 let client: Anthropic | null = null;
+// modelos que já sabemos que não aceitam ferramenta forçada (os outros são descobertos no primeiro erro)
+const NO_FORCED_TOOL = new Set<string>(["claude-sonnet-5-5", ...(process.env.NINA_AUTO_TOOL_MODELS ?? "").split(",").map((m) => m.trim()).filter(Boolean)]);
 export function llmEnabled() {
   return !!process.env.ANTHROPIC_API_KEY;
 }
@@ -52,15 +54,31 @@ export async function callNina(history: Turn[], contextJson: string, message: st
   while (msgs.length && msgs[0].role !== "user") msgs.shift();
 
   const started = Date.now();
-  const res = await client.messages.create({
+  // Alguns modelos não aceitam "forçar" a ferramenta (tool_choice tool/any): para eles usamos "auto"
+  // com a instrução de sempre responder pela ferramenta. Aprendemos isso no primeiro erro e lembramos.
+  const forced = !NO_FORCED_TOOL.has(model);
+  const create = (force: boolean) => client!.messages.create({
     model,
     max_tokens: 1200,
-    temperature: 0.2,
-    system: [{ type: "text", text: NINA_SYSTEM, cache_control: { type: "ephemeral" } }],
+    ...(force ? { temperature: 0.2 } : {}),
+    system: [
+      { type: "text", text: NINA_SYSTEM, cache_control: { type: "ephemeral" } },
+      ...(force ? [] : [{ type: "text" as const, text: `IMPORTANTE: responda SEMPRE chamando a ferramenta "${ORGANIZE_TOOL.name}". Nunca responda só com texto.` }]),
+    ],
     tools: [ORGANIZE_TOOL],
-    tool_choice: { type: "tool", name: ORGANIZE_TOOL.name },
+    tool_choice: force ? { type: "tool", name: ORGANIZE_TOOL.name } : { type: "auto" },
     messages: msgs,
   });
+  let res;
+  try {
+    res = await create(forced);
+  } catch (e) {
+    if (forced && /tool_choice/i.test(String((e as Error)?.message ?? e))) {
+      NO_FORCED_TOOL.add(model);
+      log.info("nina.llm_auto_tool", { model });
+      res = await create(false);
+    } else throw e;
+  }
   log.info("nina.llm", {
     model, ms: Date.now() - started, input_tokens: res.usage.input_tokens, output_tokens: res.usage.output_tokens,
     cache_read: res.usage.cache_read_input_tokens ?? 0, stop: res.stop_reason,
