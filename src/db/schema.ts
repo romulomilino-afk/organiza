@@ -516,3 +516,23 @@ export type Household = typeof households.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type Warranty = typeof warranties.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;
+
+// ─────────────── Fechamento do mês e reserva ───────────────
+/** O que a pessoa decidiu fazer com a sobra (ou o vermelho) de um mês que acabou. */
+export const monthClosings = pgTable("month_closings", {
+  userId: userId(),
+  month: text("month").notNull(),                 // "2026-10"
+  resultCents: integer("result_cents").notNull(), // receitas − despesas do mês
+  decision: text("decision").notNull(),           // RESERVE (guardar/cobrir com a reserva) | CARRY (somar/descontar no mês seguinte) | IGNORE
+  createdAt: createdAt(),
+}, (t) => [primaryKey({ columns: [t.userId, t.month] })]);
+
+/** Movimentos da reserva: positivo = guardou, negativo = retirou. O saldo é a soma. */
+export const reserveMovements = pgTable("reserve_movements", {
+  id: id(),
+  userId: userId(),
+  amountCents: integer("amount_cents").notNull(),
+  description: text("description").notNull(),
+  date: date("date", { mode: "string" }).notNull(),
+  createdAt: createdAt(),
+}, (t) => [index("reserve_user_idx").on(t.userId, t.date)]);

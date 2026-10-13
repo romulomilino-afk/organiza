@@ -95,7 +95,7 @@ async function handleMessageInner(db: DB, user: User, text: string, source: "TEX
     // tenta o modelo mais indicado; se falhar (limite, instabilidade, resposta inválida), o outro; depois o modo simples
     for (const model of chooseModels(text, source)) {
       try {
-        ctxJson ??= JSON.stringify(await buildContext(db, user, access, today));
+        ctxJson ??= JSON.stringify(await buildContext(db, user, access, today, text));
         out = parseNinaOutput(await callNina(turns, ctxJson, text, model));
         mode = "ai";
         break;

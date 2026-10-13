@@ -8,6 +8,9 @@ import { addCategoryForm, deleteCategory } from "@/actions/categories";
 import { payInvoiceAction } from "@/actions/cards";
 import { unpaidInvoicesDue } from "@/lib/cards";
 import { FinanceTabs } from "@/components/FinanceTabs";
+import { ReserveForm } from "@/components/ReserveForm";
+import { monthLabel, pendingClosing, reserveBalance, reserveHistory } from "@/lib/months";
+import { decideClosingAction } from "@/actions/months";
 import { convert, getRates, rate } from "@/lib/fx";
 import { CURRENCIES, isCurrency, type Currency } from "@/lib/money";
 import { fmtBR } from "@/lib/dates";
@@ -41,6 +44,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
   const [fin, bills, subs, fam, fixos, ucats] = await Promise.all([monthFinance(db, user.id, today), pendingBills(db, access), activeSubscriptions(db, user.id), householdFinance(db, access, today), fixedItems(db, user.id), loadCategories(db, user.id)]);
   const faturas = await unpaidInvoicesDue(db, user.id, today, addDays(today, 30));
   const budget = await monthBudget(db, user.id, today, user.timezone);
+  const [closing, reserve, reserveLog] = await Promise.all([pendingClosing(db, user.id, today), reserveBalance(db, user.id), reserveHistory(db, user.id, 6)]);
   const myCur: Currency = isCurrency(user.currency) ? user.currency : "BRL";
   const sym = CURRENCIES[myCur].symbol;
   // conversor de moedas
@@ -68,6 +72,23 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
       <PageHeader title="Dinheiro" subtitle={`Este mês · ${MESES[Number(today.slice(5, 7)) - 1]}`} />
       <FinanceTabs active="resumo" />
       <div className="flex flex-col gap-3">
+        {closing && (
+          <div className={`card flex flex-col gap-3 ${closing.resultCents > 0 ? "bg-accent-soft" : "bg-bad-soft"}`}>
+            <div>
+              <div className="eyebrow mb-1">Fechamento de {monthLabel(closing.month)}</div>
+              <p className="text-[15px]">
+                {closing.resultCents > 0
+                  ? <><b>{monthLabel(closing.month)[0].toUpperCase() + monthLabel(closing.month).slice(1)} fechou com sobra de <span className="num text-good">{brl(closing.resultCents)}</span>.</b> O que você quer fazer com esse dinheiro?</>
+                  : <><b>{monthLabel(closing.month)[0].toUpperCase() + monthLabel(closing.month).slice(1)} fechou no vermelho em <span className="num text-bad">{brl(-closing.resultCents)}</span>.</b> Como você quer acertar?</>}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <form action={decideClosingAction.bind(null, "RESERVE")}><button className="btn w-full">{closing.resultCents > 0 ? "🐷 Guardar na reserva" : "🐷 Cobrir com a reserva"}</button></form>
+              <form action={decideClosingAction.bind(null, "CARRY")}><button className="btn btn-ghost w-full">{closing.resultCents > 0 ? `➕ Somar em ${monthLabel(today.slice(0, 7))}` : `➖ Descontar de ${monthLabel(today.slice(0, 7))}`}</button></form>
+              <form action={decideClosingAction.bind(null, "IGNORE")}><button className="w-full py-1 text-sm font-semibold text-ink-3 underline">Deixar como está</button></form>
+            </div>
+          </div>
+        )}
         <div className="card">
           <div className="grid grid-cols-2 gap-3">
             <div><div className="text-[13px] font-semibold text-ink-3">Receitas</div><div className="num font-display text-[26px] font-semibold text-good">{brl(fin.incomeCents)}</div></div>
@@ -120,6 +141,25 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
               )}
             </>
           ) : <Empty>Me conta sua renda e eu calculo quanto você pode gastar sem se apertar. Diga: “meu salário de 4.000 cai todo dia 5”.</Empty>}
+        </div>
+
+        <div className="card flex flex-col gap-2" id="reserva">
+          <div className="flex items-baseline justify-between">
+            <div className="eyebrow">🐷 Minha reserva</div>
+            <span className="num font-display text-[22px] font-semibold text-good">{brl(reserve)}</span>
+          </div>
+          <p className="text-[13px] text-ink-3">Dinheiro guardado fora das contas do mês. No fim de cada mês você escolhe se a sobra vem para cá ou passa para o mês seguinte.</p>
+          {reserveLog.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-[13px] font-semibold text-accent">Últimos movimentos</summary>
+              <div className="mt-1">
+                {reserveLog.map((r) => (
+                  <div key={r.id} className="flex justify-between py-1 text-sm"><span>{r.description} <span className="text-ink-3">· {fmtBR(r.date).slice(0, 5)}</span></span><b className={`num ${r.amountCents < 0 ? "text-bad" : "text-good"}`}>{r.amountCents < 0 ? "− " : "+ "}{brl(Math.abs(r.amountCents))}</b></div>
+                ))}
+              </div>
+            </details>
+          )}
+          <ReserveForm hasBalance={reserve > 0} />
         </div>
 
         <div className="card" id="conversor">

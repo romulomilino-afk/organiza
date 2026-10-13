@@ -9,6 +9,7 @@ import { and, eq } from "drizzle-orm";
 import { events, householdMembers, users } from "@/db/schema";
 import { visible, type Access } from "../access";
 import { loadCategories } from "../data/user-categories";
+import { recentMonthsForNina, reserveBalance } from "../months";
 import { cardsOverview } from "../cards";
 import { activeRoutines, openDeadlines } from "../watch";
 import { monthBudget } from "../budget";
@@ -20,7 +21,12 @@ import { hasFeature } from "../plans";
  * Tudo que a Nina precisa saber para interpretar a mensagem — só do próprio usuário.
  * Enxuto de propósito: ids + campos essenciais (custo e privacidade).
  */
-export async function buildContext(db: DB, user: User, access: Access, today: string) {
+/** A mensagem fala de meses passados, comparação ou reserva? (só aí mandamos esses dados, para economizar) */
+export function asksHistory(text: string) {
+  return /(m[eê]s passado|m[eê]s anterior|[uú]ltimos? \d* ?m[eê]s|compar|reserva|guardad|janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|hist[oó]rico|evolu[cç])/i.test(text);
+}
+
+export async function buildContext(db: DB, user: User, access: Access, today: string, text = "") {
   const calendario: string[] = [];
   for (let i = -1; i <= 14; i++) {
     const d = addDays(today, i);
@@ -63,6 +69,8 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
       .innerJoin(users, eq(users.id, householdMembers.userId)).where(eq(householdMembers.householdId, access.household.id));
     familia = { nome: access.household.name, membros: members.map((m) => m.name ?? "").filter(Boolean), financeiro_compartilhado: access.household.shareFinance };
   }
+  const withHistory = asksHistory(text) && plan.features.includes("financeiro");
+  const [history, reserve] = withHistory ? await Promise.all([recentMonthsForNina(db, user.id, today), reserveBalance(db, user.id)]) : [[], 0];
   return {
     hoje: today,
     dia_semana: DIAS[weekday(today)],
@@ -104,6 +112,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
       sobra_prevista: fixos.leftoverCents / 100,
     },
     assinaturas: subs.map((s) => ({ id: s.id, name: s.name, amount: s.amountCents / 100, cycle: s.cycle })),
+    ...(withHistory ? { meses_anteriores: history, reserva: reserve / 100 } : {}),
     financeiro_do_mes: {
       receitas: fin.incomeCents / 100,
       despesas: fin.expenseCents / 100,
