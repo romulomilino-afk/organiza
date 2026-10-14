@@ -5,15 +5,18 @@
  * - CREDIT_CARD (padrão): Asaas Checkout recorrente — o cliente digita o cartão NA PÁGINA DO ASAAS (o Organiza nunca vê
  *   os dados do cartão) e o Asaas cobra sozinho todo mês. A assinatura nasce no Asaas e é ligada ao usuário pelo webhook
  *   (pelo cliente/externalReference).
- * - UNDEFINED: assinatura com fatura mensal; o cliente escolhe Pix, boleto ou cartão a cada mês.
+ * - PIX: assinatura mensal no Pix. Todo mês o Asaas gera uma cobrança Pix (QR Code e copia e cola) e avisa o cliente;
+ *   o app também mostra um aviso quando o Pix do mês está para vencer.
+ * - PIX_YEARLY: plano anual no Pix (12 meses com 10% de desconto), renovado uma vez por ano.
+ * - UNDEFINED: (antigo) fatura mensal em que o cliente escolhe a forma de pagar.
  *
- * Fluxo: /planos → CPF/CNPJ → cria cliente → checkout (ou assinatura) → webhook PAYMENT_CONFIRMED/RECEIVED → plano ativado.
+ * Fluxo: /planos → (Pix: nome e CPF) → checkout ou assinatura → webhook PAYMENT_CONFIRMED/RECEIVED → plano ativado.
  * O CPF/CNPJ vai direto para o Asaas e NÃO é guardado no nosso banco.
  */
 import { and, desc, eq, like, lt, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { billingEvents, billingSubscriptions, users, type User } from "@/db/schema";
-import { PLANS, type PlanId } from "./plans";
+import { PLANS, yearlyCents, type PlanId } from "./plans";
 import { addMonths, todayIn } from "./dates";
 import { AppError } from "./errors";
 import { log } from "./logger";
@@ -78,7 +81,12 @@ export async function lastCanceled(db: DB, userId: string) {
   return row ?? null;
 }
 
-export type PayMethod = "CREDIT_CARD" | "UNDEFINED";
+export type PayMethod = "CREDIT_CARD" | "PIX" | "PIX_YEARLY" | "UNDEFINED";
+export const isPix = (m: string) => m === "PIX" || m === "PIX_YEARLY";
+/** Quantos meses cada pagamento cobre. */
+export const periodMonths = (m: string) => (m === "PIX_YEARLY" ? 12 : 1);
+/** Valor cobrado por pagamento, em centavos. */
+export const chargeCents = (plan: "PREMIUM" | "FAMILY", m: PayMethod) => (m === "PIX_YEARLY" ? yearlyCents(plan) : PLANS[plan].priceCents);
 const checkoutHost = () => (process.env.ASAAS_ENV === "production" ? "https://www.asaas.com" : "https://sandbox.asaas.com");
 const appUrl = () => (process.env.AUTH_URL || process.env.URL || "http://localhost:3000").replace(/\/$/, "");
 const CHECKOUT_MINUTES = 60;
@@ -93,33 +101,41 @@ export function cleanPhone(input: string): string | null {
 }
 
 /** Cria (ou reaproveita) a cobrança e devolve o link de pagamento do Asaas. */
-export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMILY", cpfCnpjRaw: string, method: PayMethod = "CREDIT_CARD", phoneRaw = ""): Promise<string> {
+export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMILY", cpfCnpjRaw: string, method: PayMethod = "CREDIT_CARD", phoneRaw = "", nameRaw = ""): Promise<string> {
   if (!billingEnabled()) throw new AppError(501, "Pagamentos ainda não configurados.", "not_configured");
   const existing = await currentBilling(db, user.id);
   if (existing && existing.plan === plan && existing.status === "ACTIVE") throw new AppError(409, `Você já assina o ${PLANS[plan].name}.`, "already_active");
   // mesma escolha ainda pendente: reaproveita o link (o checkout do cartão expira em 60 minutos)
   const fresh = existing && Date.now() - existing.createdAt.getTime() < (CHECKOUT_MINUTES - 10) * 60_000;
-  if (existing && existing.plan === plan && existing.status !== "ACTIVE" && existing.method === method && existing.lastInvoiceUrl && (method === "UNDEFINED" || fresh)) return existing.lastInvoiceUrl;
+  if (existing && existing.plan === plan && existing.status !== "ACTIVE" && existing.method === method && existing.lastInvoiceUrl && (method !== "CREDIT_CARD" || fresh)) return existing.lastInvoiceUrl;
 
   // Cartão: a própria página do Asaas pede CPF, celular e endereço do pagador (o checkout recusa
   // clientes com cadastro incompleto). Por isso não mandamos "customer"; a assinatura é ligada pelo webhook.
   const phone = cleanPhone(phoneRaw);
   let customerId = user.asaasCustomerId;
-  if (method === "UNDEFINED" && !customerId) {
+  if (method !== "CREDIT_CARD") {
+    // Pix: o Asaas exige nome e CPF do pagador. O CPF vai direto para o Asaas (não guardamos).
     const cpfCnpj = cleanCpfCnpj(cpfCnpjRaw);
     if (!cpfCnpj) throw new AppError(400, "CPF ou CNPJ inválido. Confira os números.", "invalid_document");
-    const c = await asaas<{ id: string }>("/customers", {
-      method: "POST", body: { name: user.name || user.email, email: user.email, cpfCnpj, ...(phone ? { phone, mobilePhone: phone } : {}), externalReference: user.id, notificationDisabled: false },
-    });
-    customerId = c.id;
-    await db.update(users).set({ asaasCustomerId: customerId }).where(eq(users.id, user.id));
+    const name = nameRaw.trim().replace(/\s+/g, " ").slice(0, 100) || user.name || user.email;
+    const data = { name, email: user.email, cpfCnpj, ...(phone ? { phone, mobilePhone: phone } : {}), externalReference: user.id, notificationDisabled: false };
+    if (customerId) {
+      const ok = await asaas(`/customers/${customerId}`, { method: "PUT", body: data }).then(() => true, () => false);
+      if (!ok) customerId = null; // cliente antigo removido no Asaas: cria outro
+    }
+    if (!customerId) {
+      const c = await asaas<{ id: string }>("/customers", { method: "POST", body: data });
+      customerId = c.id;
+      await db.update(users).set({ asaasCustomerId: customerId }).where(eq(users.id, user.id));
+    }
   }
 
   // trocou de plano ou de forma de pagamento (e não está ativa): encerra a cobrança anterior
   if (existing && existing.status !== "ACTIVE") await cancelBilling(db, user, { immediate: existing.plan !== plan });
   else if (existing && existing.plan !== plan) await cancelBilling(db, user, { immediate: true });
 
-  const value = PLANS[plan].priceCents / 100;
+  const cents = chargeCents(plan, method);
+  const value = cents / 100;
   const today = todayIn(user.timezone);
   let providerId: string, link: string;
 
@@ -137,11 +153,12 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
     providerId = `checkout:${co.id}`;
     link = co.link || `${checkoutHost()}/checkoutSession/show?id=${co.id}`;
   } else {
+    const yearly = method === "PIX_YEARLY";
     const sub = await asaas<{ id: string }>("/subscriptions", {
       method: "POST",
       body: {
-        customer: customerId, billingType: "UNDEFINED", value, cycle: "MONTHLY",
-        nextDueDate: today, description: `Meu Organiza ${PLANS[plan].name}`, externalReference: `${user.id}:${plan}`,
+        customer: customerId, billingType: isPix(method) ? "PIX" : "UNDEFINED", value, cycle: yearly ? "YEARLY" : "MONTHLY",
+        nextDueDate: today, description: `Meu Organiza ${PLANS[plan].name}${yearly ? " (anual)" : ""}`, externalReference: `${user.id}:${plan}`,
       },
     });
     const pays = await asaas<{ data: { invoiceUrl: string }[] }>(`/subscriptions/${sub.id}/payments`);
@@ -151,10 +168,22 @@ export async function startCheckout(db: DB, user: User, plan: "PREMIUM" | "FAMIL
   }
 
   await db.insert(billingSubscriptions).values({
-    userId: user.id, providerSubscriptionId: providerId, plan, status: "PENDING", valueCents: PLANS[plan].priceCents, lastInvoiceUrl: link, method,
+    userId: user.id, providerSubscriptionId: providerId, plan, status: "PENDING", valueCents: cents, lastInvoiceUrl: link, method,
+    nextDueDate: method === "CREDIT_CARD" ? null : today,
   });
   log.info("billing.checkout", { userId: user.id, plan, method });
   return link;
+}
+
+/** Pix: cobrança em aberto que vence em até `days` dias (ou já venceu). Para o aviso no app. */
+export async function pixDue(db: DB, user: User, days = 3) {
+  const b = await currentBilling(db, user.id);
+  if (!b || !isPix(b.method) || !b.nextDueDate || !b.lastInvoiceUrl || b.status === "PENDING") return null;
+  const today = todayIn(user.timezone);
+  const limit = new Date(Date.parse(`${today}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  if (b.nextDueDate > limit) return null;
+  const daysLeft = Math.round((Date.parse(`${b.nextDueDate}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
+  return { plan: b.plan as PlanId, dueDate: b.nextDueDate, daysLeft, url: b.lastInvoiceUrl, valueCents: b.valueCents, yearly: b.method === "PIX_YEARLY" };
 }
 
 /** Cancela no Asaas. O acesso continua até o fim do período já pago (a não ser que immediate). */
@@ -252,17 +281,26 @@ export async function handleAsaasEvent(db: DB, ev: AsaasEvent): Promise<"duplica
     case "PAYMENT_CONFIRMED":
     case "PAYMENT_RECEIVED": {
       const due = ev.payment?.dueDate ?? today;
-      await db.update(billingSubscriptions).set({ status: "ACTIVE", overdueSince: null, currentPeriodEnd: addMonths(due, 1), lastInvoiceUrl: ev.payment?.invoiceUrl ?? b.lastInvoiceUrl })
-        .where(eq(billingSubscriptions.id, b.id));
+      const end = addMonths(due, periodMonths(b.method));
+      const paidPending = !b.nextDueDate || b.nextDueDate <= due; // a cobrança em aberto foi esta (ou uma anterior)
+      await db.update(billingSubscriptions).set({
+        status: "ACTIVE", overdueSince: null,
+        currentPeriodEnd: b.currentPeriodEnd && b.currentPeriodEnd > end ? b.currentPeriodEnd : end,
+        ...(paidPending ? { nextDueDate: null, lastInvoiceUrl: ev.payment?.invoiceUrl ?? b.lastInvoiceUrl } : {}),
+      }).where(eq(billingSubscriptions.id, b.id));
       await db.update(users).set({ plan: b.plan }).where(eq(users.id, b.userId));
       log.info("billing.activated", { userId: b.userId, plan: b.plan });
       break;
     }
     case "PAYMENT_CREATED":
-      await db.update(billingSubscriptions).set({ lastInvoiceUrl: ev.payment?.invoiceUrl ?? b.lastInvoiceUrl }).where(eq(billingSubscriptions.id, b.id));
+      // Pix: nova cobrança do mês (ou do ano) gerada; guardamos o link e o vencimento para avisar no app
+      await db.update(billingSubscriptions).set({
+        lastInvoiceUrl: ev.payment?.invoiceUrl ?? b.lastInvoiceUrl,
+        ...(isPix(b.method) && ev.payment?.dueDate ? { nextDueDate: ev.payment.dueDate } : {}),
+      }).where(eq(billingSubscriptions.id, b.id));
       break;
     case "PAYMENT_OVERDUE":
-      await db.update(billingSubscriptions).set({ status: "OVERDUE", overdueSince: b.overdueSince ?? today, lastInvoiceUrl: ev.payment?.invoiceUrl ?? b.lastInvoiceUrl })
+      await db.update(billingSubscriptions).set({ status: "OVERDUE", overdueSince: b.overdueSince ?? today, lastInvoiceUrl: ev.payment?.invoiceUrl ?? b.lastInvoiceUrl, ...(isPix(b.method) && ev.payment?.dueDate ? { nextDueDate: ev.payment.dueDate } : {}) })
         .where(eq(billingSubscriptions.id, b.id));
       break;
     case "PAYMENT_REFUNDED":

@@ -386,7 +386,8 @@ export const billingSubscriptions = pgTable("billing_subscriptions", {
   currentPeriodEnd: date("current_period_end", { mode: "string" }),
   overdueSince: date("overdue_since", { mode: "string" }),
   lastInvoiceUrl: text("last_invoice_url"),
-  method: text("method").notNull().default("UNDEFINED"), // CREDIT_CARD (automático) | UNDEFINED (Pix/boleto/cartão na fatura)
+  method: text("method").notNull().default("UNDEFINED"), // CREDIT_CARD (automático) | PIX (mensal) | PIX_YEARLY (anual) | UNDEFINED (antigo)
+  nextDueDate: date("next_due_date", { mode: "string" }), // Pix: cobrança do próximo período já gerada e ainda não paga
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("billing_user_idx").on(t.userId, t.status)]);

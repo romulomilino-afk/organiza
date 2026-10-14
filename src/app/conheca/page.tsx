@@ -57,7 +57,8 @@ const PLAN_FEATURES: Record<"FREE" | "PREMIUM" | "FAMILY", string[]> = {
 const FAQ = [
   { q: "Preciso baixar alguma coisa?", a: "Não. O Meu Organiza funciona no navegador e pode ser instalado na tela do celular como um aplicativo, em menos de 1 minuto. Ele se atualiza sozinho." },
   { q: "Como funciona o teste grátis?", a: "Ao criar a conta, você usa todas as funções por 7 dias, sem cadastrar cartão. Depois, escolhe se continua no plano Grátis ou assina o Premium ou o Família." },
-  { q: "Posso cancelar quando quiser?", a: "Sim. Em Planos, toque em “Cancelar assinatura”. Você continua com acesso até o fim do mês já pago e não há novas cobranças." },
+  { q: "Posso pagar no Pix?", a: "Pode. No Pix mensal, todo mês chega um Pix para pagar e o app avisa antes de vencer. No Pix anual, você paga uma vez por ano com 10% de desconto." },
+  { q: "Posso cancelar quando quiser?", a: "Sim. Em Planos, toque em “Cancelar assinatura”. Você continua com acesso até o fim do período já pago e não há novas cobranças." },
   { q: "Meus dados estão seguros?", a: "Sim. A conexão é criptografada, as senhas são cifradas, os documentos são guardados criptografados e cada pessoa só vê os próprios dados. O cartão é digitado na página segura do Asaas e não passa pelo Meu Organiza." },
   { q: "Funciona no iPhone e no Android?", a: "Nos dois, e também no computador. Basta acessar meuorganiza.com.br." },
   { q: "Preciso saber usar planilha ou app de finanças?", a: "Não. Você fala do seu jeito, como falaria com um amigo, e a Nina organiza tudo." },
@@ -217,7 +218,7 @@ export default function ConhecaPage() {
               );
             })}
           </div>
-          <p className="mt-5 text-[14px]" style={{ color: B }}>Pagamento por cartão de crédito com cobrança automática mensal, pelo Asaas. Cancele quando quiser.</p>
+          <p className="mt-5 text-[14px]" style={{ color: B }}>Pague no cartão (cobrança automática), no Pix todo mês ou no Pix anual com 10% de desconto, pelo Asaas. Cancele quando quiser.</p>
         </section>
 
         {/* instalar */}

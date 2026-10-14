@@ -19,6 +19,12 @@ export const PLANS: Record<PlanId, { name: string; priceCents: number; monthlyIn
   },
 };
 
+/** Plano anual (pago no Pix de uma vez): 12 meses com 10% de desconto. */
+export const YEARLY_DISCOUNT = 0.1;
+export function yearlyCents(plan: PlanId): number {
+  return Math.round(PLANS[plan].priceCents * 12 * (1 - YEARLY_DISCOUNT));
+}
+
 export function hasFeature(plan: PlanId, f: Feature): boolean {
   return PLANS[plan].features.includes(f);
 }

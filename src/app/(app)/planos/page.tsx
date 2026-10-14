@@ -1,9 +1,9 @@
 import { getDb } from "@/db";
 import { requirePageAccess } from "@/lib/session";
-import { PLANS, type PlanId } from "@/lib/plans";
+import { PLANS, yearlyCents, type PlanId } from "@/lib/plans";
 import { brl } from "@/lib/money";
 import { fmtBR } from "@/lib/dates";
-import { billingEnabled, currentBilling } from "@/lib/billing";
+import { billingEnabled, currentBilling, isPix } from "@/lib/billing";
 import { todayIn } from "@/lib/dates";
 import { CancelSubscription } from "@/components/CancelSubscription";
 import { lastCanceled } from "@/lib/billing";
@@ -46,13 +46,19 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
               {{ ACTIVE: "Ativa", PENDING: "Aguardando pagamento", OVERDUE: "Pagamento atrasado", CANCELED: "Cancelada" }[billing.status]}
             </span>
           </div>
-          <p className="text-sm text-ink-2">{billing.method === "CREDIT_CARD" ? "💳 Cobrança automática no cartão todo mês" : "Fatura mensal (Pix, boleto ou cartão)"}</p>
+          <p className="text-sm text-ink-2">{{
+            CREDIT_CARD: "💳 Cobrança automática no cartão todo mês",
+            PIX: `⚡ Pix mensal de ${brl(billing.valueCents, "BRL")}`,
+            PIX_YEARLY: `🎁 Pix anual de ${brl(billing.valueCents, "BRL")} (10% de desconto)`,
+          }[billing.method] ?? "Fatura mensal (Pix, boleto ou cartão)"}</p>
           {billing.currentPeriodEnd && <p className="text-sm text-ink-2">{billing.status === "ACTIVE" && billing.method === "CREDIT_CARD" ? `Próxima cobrança no cartão: ${fmtBR(billing.currentPeriodEnd)}.` : `Pago até ${fmtBR(billing.currentPeriodEnd)}.`}</p>}
-          {billing.status !== "ACTIVE" && billing.lastInvoiceUrl && (
-            <a href={billing.lastInvoiceUrl} target="_blank" rel="noopener noreferrer" className="btn w-fit">{billing.method === "CREDIT_CARD" && billing.status === "PENDING" ? "Concluir pagamento com cartão" : "Pagar"}</a>
+          {isPix(billing.method) && billing.status === "ACTIVE" && billing.nextDueDate && <p className="text-sm font-semibold">O Pix {billing.method === "PIX_YEARLY" ? "da renovação" : "do próximo mês"} já está disponível. Vence em {fmtBR(billing.nextDueDate)}.</p>}
+          {isPix(billing.method) && billing.status === "PENDING" && <p className="text-sm text-ink-2">Pague o Pix pelo app do seu banco. Assim que cair (normalmente em segundos), o plano é liberado.</p>}
+          {(billing.status !== "ACTIVE" || (isPix(billing.method) && billing.nextDueDate)) && billing.lastInvoiceUrl && (
+            <a href={billing.lastInvoiceUrl} target="_blank" rel="noopener noreferrer" className="btn w-fit">{isPix(billing.method) ? "Pagar com Pix" : billing.method === "CREDIT_CARD" && billing.status === "PENDING" ? "Concluir pagamento com cartão" : "Pagar"}</a>
           )}
           {billing.status === "OVERDUE" && <p className="text-sm text-bad">Pague em até 7 dias para não perder os recursos do plano.</p>}
-          <CancelSubscription planName={PLANS[billing.plan as PlanId].name} until={billing.status === "ACTIVE" && billing.currentPeriodEnd ? fmtBR(billing.currentPeriodEnd) : null} pendingOnly={billing.status === "PENDING"} />
+          <CancelSubscription pix={isPix(billing.method)} planName={PLANS[billing.plan as PlanId].name} until={billing.status === "ACTIVE" && billing.currentPeriodEnd ? fmtBR(billing.currentPeriodEnd) : null} pendingOnly={billing.status === "PENDING"} />
         </div>
       )}
       {!enabled && <p className="card mb-3 text-sm text-ink-2">Pagamentos ainda não configurados neste servidor (ASAAS_API_KEY).</p>}
@@ -65,10 +71,12 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
                 <h2 className="text-xl font-semibold">{PLANS[p].name}</h2>
                 <span className="num font-display text-lg font-semibold">{PLANS[p].priceCents ? `${brl(PLANS[p].priceCents, "BRL")}/mês` : "Grátis"}</span>
               </div>
+              {p !== "FREE" && <p className="-mt-2 text-[13px] text-ink-3">ou {brl(yearlyCents(p), "BRL")}/ano no Pix <b className="text-accent">(10% off)</b></p>}
               <ul className="flex flex-col gap-1 text-[15px] text-ink-2">{FEATURES[p].map((f) => <li key={f}>✓ {f}</li>)}</ul>
               {current ? <span className="pill pill-ok w-fit">{inTrial && p === "FREE" ? "Depois do teste" : "Seu plano"}</span>
                 : p !== "FREE" && enabled && !(billing?.status === "ACTIVE" && billing.plan === p) && (
-                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} />
+                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} name={user.name}
+                    monthly={brl(PLANS[p].priceCents, "BRL")} yearly={brl(yearlyCents(p), "BRL")} yearlyPerMonth={brl(Math.round(yearlyCents(p) / 12), "BRL")} />
                 )}
             </div>
           );
