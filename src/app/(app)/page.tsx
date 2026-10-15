@@ -8,6 +8,9 @@ import { dismissedKeys, ensureRecurringBills } from "@/lib/data/queries";
 import { buildPendencias, DOT, type Pend } from "@/lib/data/pendencias";
 import { ensureRoutines } from "@/lib/watch";
 import { monthBudget } from "@/lib/budget";
+import { healthFor } from "@/lib/health";
+import { reserveBalance } from "@/lib/months";
+import { HealthBar } from "@/components/HealthBar";
 import { PushToggle } from "@/components/PushToggle";
 import { dismissAlert, payBill, toggleShopping, toggleTask } from "@/actions/items";
 import { payInvoiceAction } from "@/actions/cards";
@@ -46,6 +49,7 @@ export default async function HomePage() {
     buildPendencias(db, access, today, (keys) => dismissedKeys(db, user.id, keys)),
     showFinance ? monthBudget(db, user.id, today, user.timezone) : Promise.resolve(null),
   ]);
+  const health = budget ? await healthFor(db, user.id, today, budget, await reserveBalance(db, user.id)) : null;
   const first = user.name?.split(" ")[0] || "você";
   const reds = pend.filter((p) => p.color === "red").length;
 
@@ -99,6 +103,7 @@ export default async function HomePage() {
               <>
                 <div className={`num font-display text-[24px] font-semibold leading-tight ${budget.marginCents < 0 ? "text-bad" : "text-good"}`}>{budget.marginCents < 0 ? brl(budget.marginCents) : brl(budget.freeCents)}</div>
                 <div className="text-[13px] text-ink-3">{budget.marginCents < 0 ? "no vermelho este mês" : `livres este mês · ~${brl(budget.perDayCents)}/dia`}</div>
+                {health && <div className="mt-2"><HealthBar h={health} compact /></div>}
               </>
             ) : <p className="text-sm text-ink-2">Me diga sua renda e eu calculo quanto sobra no mês.</p>}
           </Link>

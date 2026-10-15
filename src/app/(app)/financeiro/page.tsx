@@ -15,6 +15,8 @@ import { convert, getRates, rate } from "@/lib/fx";
 import { CURRENCIES, isCurrency, type Currency } from "@/lib/money";
 import { fmtBR } from "@/lib/dates";
 import { explainSimulation, monthBudget, simulate } from "@/lib/budget";
+import { healthFor } from "@/lib/health";
+import { HealthBar } from "@/components/HealthBar";
 import { addDays } from "@/lib/dates";
 import { hasFeature, PLANS, type PlanId } from "@/lib/plans";
 import { activeSubscriptions, ensureRecurringBills, fixedItems, householdFinance, monthFinance, pendingBills } from "@/lib/data/queries";
@@ -45,6 +47,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
   const faturas = await unpaidInvoicesDue(db, user.id, today, addDays(today, 30));
   const budget = await monthBudget(db, user.id, today, user.timezone);
   const [closing, reserve, reserveLog] = await Promise.all([pendingClosing(db, user.id, today), reserveBalance(db, user.id), reserveHistory(db, user.id, 6)]);
+  const health = await healthFor(db, user.id, today, budget, reserve);
   const myCur: Currency = isCurrency(user.currency) ? user.currency : "BRL";
   const sym = CURRENCIES[myCur].symbol;
   // conversor de moedas
@@ -89,6 +92,10 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
             </div>
           </div>
         )}
+        <div className="card" id="saude">
+          <div className="eyebrow mb-2">❤️ Saúde financeira do mês</div>
+          <HealthBar h={health} />
+        </div>
         <div className="card">
           <div className="grid grid-cols-2 gap-3">
             <div><div className="text-[13px] font-semibold text-ink-3">Receitas</div><div className="num font-display text-[26px] font-semibold text-good">{brl(fin.incomeCents)}</div></div>

@@ -13,6 +13,7 @@ import { recentMonthsForNina, reserveBalance } from "../months";
 import { cardsOverview } from "../cards";
 import { activeRoutines, openDeadlines } from "../watch";
 import { monthBudget } from "../budget";
+import { healthFor } from "../health";
 import { getRates, rate } from "../fx";
 import { CURRENCIES, isCurrency, type Currency } from "../money";
 import { hasFeature } from "../plans";
@@ -49,6 +50,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     activeRoutines(db, access),
   ]);
   const budget = hasFeature(access.plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
+  const health = budget ? await healthFor(db, user.id, today, budget).catch(() => null) : null;
   const r2 = (c: number) => Math.round(c) / 100;
   const myCur: Currency = isCurrency(user.currency) ? user.currency : "BRL";
   const fx = await getRates(db, today);
@@ -94,6 +96,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
       margem_do_mes: r2(budget.marginCents), folga_para_imprevistos: r2(budget.cushionCents), pode_gastar_sem_apertar: r2(budget.freeCents), por_dia: r2(budget.perDayCents), dias_restantes: budget.daysLeft,
       proximo_mes: { receita_fixa: r2(budget.next.incomeCents), fixos_e_contas: r2(budget.next.fixedOutCents), parcelas_cartao: r2(budget.next.cardCents), margem_prevista: r2(budget.next.marginCents) },
       tem_renda_cadastrada: budget.hasIncome,
+      saude_financeira: health ? { cor: health.level, situacao: health.label, motivos: health.reasons, dica: health.tip } : null,
     } : null,
     vencimentos: dls.slice(0, 40).map((d) => ({ id: d.id, name: d.name, vence: d.dueDate, avisar_dias_antes: d.remindDaysBefore, renova_meses: d.renewMonths })),
     compras_de_rotina: routines.map((r) => ({ item: r.name, a_cada_dias: r.everyDays, proxima: r.nextDate })),
