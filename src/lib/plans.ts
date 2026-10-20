@@ -14,7 +14,7 @@ export const PLANS: Record<PlanId, { name: string; priceCents: number; monthlyIn
     features: ["agenda", "tarefas", "compras", "lembretes", "financeiro", "memoria", "documentos", "garantias", "assinaturas", "audio", "whatsapp"],
   },
   FAMILY: {
-    name: "Família", priceCents: 2990, monthlyInteractions: 5000, maxMembers: 5,
+    name: "Família", priceCents: 4990, monthlyInteractions: 5000, maxMembers: 5,
     features: ["agenda", "tarefas", "compras", "lembretes", "financeiro", "memoria", "documentos", "garantias", "assinaturas", "audio", "whatsapp", "familia"],
   },
 };

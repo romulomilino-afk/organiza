@@ -50,7 +50,7 @@ before(async () => {
 
 test("anual tem 10% de desconto sobre 12 meses", () => {
   assert.equal(yearlyCents("PREMIUM"), 21492); // 12 × 19,90 = 238,80 → 214,92
-  assert.equal(yearlyCents("FAMILY"), 32292);  // 12 × 29,90 = 358,80 → 322,92
+  assert.equal(yearlyCents("FAMILY"), 53892);  // 12 × 49,90 = 598,80 → 538,92
 });
 
 test("Pix mensal: pede CPF, cria assinatura PIX mensal, ativa e avisa o próximo vencimento", async () => {
@@ -115,9 +115,9 @@ test("Pix anual: cobra o valor com desconto, ciclo anual e libera por 12 meses",
   const sub = calls.find((c) => c.path === "/subscriptions" && c.method === "POST")!;
   assert.equal(sub.body.billingType, "PIX");
   assert.equal(sub.body.cycle, "YEARLY");
-  assert.equal(sub.body.value, 322.92);
+  assert.equal(sub.body.value, 538.92);
   const b = await billing(u.id);
-  assert.equal(b.valueCents, 32292);
+  assert.equal(b.valueCents, 53892);
   const today = todayIn(tz);
   await handleAsaasEvent(db, { id: "y1", event: "PAYMENT_RECEIVED", payment: { id: "py1", subscription: b.providerSubscriptionId, dueDate: today } });
   assert.equal((await reload(u.id)).plan, "FAMILY");

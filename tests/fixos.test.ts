@@ -66,7 +66,9 @@ test("receita fixa: lança sozinha no dia, uma vez por mês, e não volta se for
   assert.deepEqual((await incomes(u.id)).map((i) => i.date), ["2026-11-05", "2027-01-05", "2027-02-05", "2027-03-05"]);
 });
 
-test("despesa fixa automática entra como paga; conta fixa vira conta a pagar", async () => {
+test("despesa fixa automática entra como paga; conta fixa vira conta a pagar", async (t) => {
+  // o teste se passa em 1º de outubro de 2026 (a conta criada depois do dia 15 só começaria em novembro)
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
   const u = await mk("aluguel@x.com");
   await run(u, "2026-10-01", { type: "add_fixed", kind: "expense", name: "aluguel", amount: 1500, day: 10, category: "casa" });
   await run(u, "2026-10-01", { type: "add_fixed", kind: "expense", name: "escola", amount: 900, day: 15, category: "educacao", auto: false });
