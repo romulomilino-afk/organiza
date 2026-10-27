@@ -5,6 +5,7 @@ import { brl } from "@/lib/money";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { InstallApp } from "@/components/InstallApp";
+import { SiteMenu } from "@/components/SiteMenu";
 
 // vídeo de apresentação: aparece só se o arquivo existir em public/videos (verificado no build)
 const VIDEO = "/videos/apresentacao.mp4";
@@ -75,8 +76,9 @@ export default function ConhecaPage() {
             <a href="#como-funciona">Como funciona</a><a href="#beneficios">Benefícios</a><a href="#planos">Planos</a><a href="#instalar">Instalar</a><a href="#duvidas">Dúvidas</a>
           </nav>
           <div className="flex items-center gap-2">
-            <Link href="/login" className="whitespace-nowrap rounded-xl px-2 py-2 text-[15px] font-semibold sm:px-3" style={{ color: G }}>Entrar</Link>
+            <Link href="/login" className="hidden whitespace-nowrap rounded-xl px-2 py-2 text-[15px] font-semibold min-[420px]:inline-block sm:px-3" style={{ color: G }}>Entrar</Link>
             <Link href="/cadastro" className="whitespace-nowrap rounded-xl px-3.5 py-2.5 text-[15px] font-bold sm:px-4" style={{ background: G, color: C }}><span className="sm:hidden">Testar grátis</span><span className="hidden sm:inline">Começar grátis</span></Link>
+            <SiteMenu />
           </div>
         </div>
       </header>
