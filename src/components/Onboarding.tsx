@@ -17,7 +17,7 @@ export function Onboarding({ initialName }: { initialName: string }) {
     if (k === "tudo") return setFocus(focus.includes("tudo") ? [] : [...ALL]);
     setFocus(focus.includes(k) ? focus.filter((x) => x !== k && x !== "tudo") : [...focus, k]);
   };
-  const finish = () => start(async () => { await completeOnboarding({ name: name.trim(), focus, currency }); window.location.href = "/"; });
+  const finish = () => start(async () => { await completeOnboarding({ name: name.trim(), focus, currency }); window.location.href = "/planos?bemvindo=1"; });
 
   const dots = (
     <div className="flex gap-1.5" aria-label={`Passo ${step} de 3`}>

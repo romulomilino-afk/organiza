@@ -3,7 +3,8 @@ import { requirePageAccess } from "@/lib/session";
 import { PLANS, yearlyCents, type PlanId } from "@/lib/plans";
 import { brl } from "@/lib/money";
 import { fmtBR } from "@/lib/dates";
-import { billingEnabled, currentBilling, isPix } from "@/lib/billing";
+import { billingEnabled, cardTrial, currentBilling, isPix, trialEligible, CARD_TRIAL_DAYS } from "@/lib/billing";
+import { addDays } from "@/lib/dates";
 import { todayIn } from "@/lib/dates";
 import { CancelSubscription } from "@/components/CancelSubscription";
 import { lastCanceled } from "@/lib/billing";
@@ -16,7 +17,7 @@ const FEATURES: Record<PlanId, string[]> = {
   FAMILY: ["Tudo do Premium", "Até 5 pessoas", "Agenda e tarefas compartilhadas", "Lista de compras da família", "Financeiro compartilhado (opcional)"],
 };
 
-export default async function PlanosPage({ searchParams }: { searchParams: Promise<{ pago?: string; cancelada?: string }> }) {
+export default async function PlanosPage({ searchParams }: { searchParams: Promise<{ pago?: string; cancelada?: string; teste?: string; bemvindo?: string }> }) {
   const sp = await searchParams;
   const { user, access } = await requirePageAccess();
   const billing = await currentBilling(getDb(), user.id);
@@ -26,6 +27,8 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
   const inherited = access.plan !== access.ownPlan;
   const mine = user.plan as PlanId; // plano assinado (o teste grátis não conta aqui)
   const inTrial = !!access.trial?.active;
+  const [canTrial, ct] = await Promise.all([trialEligible(getDb(), user.id), cardTrial(getDb(), user)]);
+  const firstCharge = fmtBR(addDays(todayIn(user.timezone), CARD_TRIAL_DAYS));
 
   return (
     <>
@@ -33,6 +36,17 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
       {sp.pago && billing?.status !== "ACTIVE" && (
         <p className="card mb-3 bg-accent-soft text-[15px]">✅ Pagamento enviado! Assim que o Asaas confirmar (normalmente em segundos), seu plano é ativado. Recarregue a página em instantes.</p>
       )}
+      {sp.teste && billing?.status !== "ACTIVE" && (
+        <p className="card mb-3 bg-accent-soft text-[15px]">✅ Cartão cadastrado! Assim que o Asaas confirmar (normalmente em segundos), seus 7 dias grátis começam. Recarregue a página em instantes.</p>
+      )}
+      {sp.bemvindo && canTrial && !ct && (
+        <div className="card mb-3 flex flex-col gap-1 bg-accent-soft text-[15px]">
+          <b className="font-display text-lg">🎁 Comece seus 7 dias grátis</b>
+          <p>Escolha o Premium ou o Família e cadastre o cartão. Você usa tudo de graça e a primeira cobrança só acontece em <b>{firstCharge}</b>. Se cancelar antes, não paga nada.</p>
+          <p className="text-[13px] text-ink-3">Se preferir, dá para continuar no plano Grátis (agenda, tarefas e compras).</p>
+        </div>
+      )}
+      {ct && <p className="card mb-3 bg-accent-soft text-[15px]">🎁 <b>Teste grátis do {PLANS[ct.plan].name}</b> até {fmtBR(ct.chargeDate)}. A primeira cobrança de <b>{brl(ct.valueCents, "BRL")}</b> no cartão acontece nesse dia. Se não quiser continuar, cancele antes e não paga nada.</p>}
       {inTrial && <p className="card mb-3 bg-accent-soft text-[15px]">🎁 Você está no teste grátis de 7 dias com todas as funções. Depois dele, a conta volta para o Grátis (só agenda, tarefas e compras). Assine agora e continue sem interrupção.</p>}
       {access.trial && !access.trial.active && mine === "FREE" && !inherited && <p className="card mb-3 bg-bad-soft text-[15px]"><b>Seu teste grátis acabou.</b> Escolha o Premium ou o Família para liberar de novo o financeiro, os cartões, o áudio, os documentos e o WhatsApp. Seus dados continuam guardados.</p>}
       {sp.cancelada && <p className="card mb-3 text-[15px]">✅ Pronto, a assinatura foi cancelada. Não haverá novas cobranças.</p>}
@@ -58,7 +72,7 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
             <a href={billing.lastInvoiceUrl} target="_blank" rel="noopener noreferrer" className="btn w-fit">{isPix(billing.method) ? "Pagar com Pix" : billing.method === "CREDIT_CARD" && billing.status === "PENDING" ? "Concluir pagamento com cartão" : "Pagar"}</a>
           )}
           {billing.status === "OVERDUE" && <p className="text-sm text-bad">Pague em até 7 dias para não perder os recursos do plano.</p>}
-          <CancelSubscription pix={isPix(billing.method)} planName={PLANS[billing.plan as PlanId].name} until={billing.status === "ACTIVE" && billing.currentPeriodEnd ? fmtBR(billing.currentPeriodEnd) : null} pendingOnly={billing.status === "PENDING"} />
+          <CancelSubscription trialUntil={ct ? fmtBR(ct.chargeDate) : null} pix={isPix(billing.method)} planName={PLANS[billing.plan as PlanId].name} until={billing.status === "ACTIVE" && billing.currentPeriodEnd ? fmtBR(billing.currentPeriodEnd) : null} pendingOnly={billing.status === "PENDING"} />
         </div>
       )}
       {!enabled && <p className="card mb-3 text-sm text-ink-2">Pagamentos ainda não configurados neste servidor (ASAAS_API_KEY).</p>}
@@ -75,7 +89,7 @@ export default async function PlanosPage({ searchParams }: { searchParams: Promi
               <ul className="flex flex-col gap-1 text-[15px] text-ink-2">{FEATURES[p].map((f) => <li key={f}>✓ {f}</li>)}</ul>
               {current ? <span className="pill pill-ok w-fit">{inTrial && p === "FREE" ? "Depois do teste" : "Seu plano"}</span>
                 : p !== "FREE" && enabled && !(billing?.status === "ACTIVE" && billing.plan === p) && (
-                  <CheckoutForm plan={p} label={`Assinar ${PLANS[p].name}`} name={user.name}
+                  <CheckoutForm plan={p} label={canTrial ? `Testar ${PLANS[p].name} 7 dias grátis` : `Assinar ${PLANS[p].name}`} name={user.name} trialUntil={canTrial ? firstCharge : null}
                     monthly={brl(PLANS[p].priceCents, "BRL")} yearly={brl(yearlyCents(p), "BRL")} yearlyPerMonth={brl(Math.round(yearlyCents(p) / 12), "BRL")} />
                 )}
             </div>

@@ -82,7 +82,10 @@ test("Asaas: assinatura com cartão (checkout recorrente) é ligada pelo webhook
   }) as typeof fetch;
 
   const u = await mk("cartao@x.com", "FREE");
+  // já assinou antes (não tem mais direito ao teste grátis): a cobrança é no mesmo dia
+  await db.insert(schema.billingSubscriptions).values({ userId: u.id, providerSubscriptionId: "sub_antiga", plan: "PREMIUM", status: "CANCELED", valueCents: 1990, currentPeriodEnd: "2026-06-01", method: "CREDIT_CARD" });
   const link = await startCheckout(db, u, "PREMIUM", "", "CREDIT_CARD");
+  await db.delete(schema.billingSubscriptions).where(eq(schema.billingSubscriptions.providerSubscriptionId, "sub_antiga"));
   assert.equal(link, "https://sandbox.asaas.com/checkoutSession/show?id=co_9");
   assert.equal(calls.filter((c) => c.url.includes("/customers")).length, 0, "no cartão quem preenche CPF, celular e endereço é a pessoa, na página do Asaas");
   const co = calls.find((c) => c.url.endsWith("/checkouts"))!;

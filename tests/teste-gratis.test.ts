@@ -22,12 +22,19 @@ before(async () => {
   await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
 });
 
-test("cadastro novo ganha 7 dias com tudo liberado (como Família)", async () => {
-  assert.equal(TRIAL_DAYS, 7);
+test("cadastro novo não ganha mais teste automático: o teste agora é com cartão", async () => {
   const [u] = await db.insert(schema.users).values({ email: "novo@x.com", name: "Novo", onboarded: true }).returning();
   await ensureUserSetup(db, u.id);
-  const days = (u.trialEndsAt!.getTime() - Date.now()) / DAY;
-  assert.ok(days > 6.9 && days <= 7, `teste de ${days} dias`);
+  assert.equal(u.trialEndsAt, null);
+  const a = await getAccess(db, u);
+  assert.equal(a.plan, "FREE");
+  assert.equal(a.trial, null);
+});
+
+test("conta antiga ainda no teste sem cartão continua com tudo liberado até o fim", async () => {
+  assert.equal(TRIAL_DAYS, 7);
+  const [u] = await db.insert(schema.users).values({ email: "antigo@x.com", name: "Antigo", onboarded: true, trialEndsAt: new Date(Date.now() + 7 * DAY) }).returning();
+  await ensureUserSetup(db, u.id);
   const a = await getAccess(db, u);
   assert.equal(a.plan, "FAMILY");
   assert.equal(a.trial?.active, true);

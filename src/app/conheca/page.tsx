@@ -57,7 +57,7 @@ const PLAN_FEATURES: Record<"FREE" | "PREMIUM" | "FAMILY", string[]> = {
 
 const FAQ = [
   { q: "Preciso baixar alguma coisa?", a: "Não. O Meu Organiza funciona no navegador e pode ser instalado na tela do celular como um aplicativo, em menos de 1 minuto. Ele se atualiza sozinho." },
-  { q: "Como funciona o teste grátis?", a: "Ao criar a conta, você usa todas as funções por 7 dias, sem cadastrar cartão. Depois, escolhe se continua no plano Grátis ou assina o Premium ou o Família." },
+  { q: "Como funciona o teste grátis?", a: "Você escolhe o Premium ou o Família e cadastra o cartão na página segura do Asaas. Durante 7 dias usa tudo sem pagar nada; a primeira cobrança só acontece no 8º dia. Se cancelar antes, em Planos, não é cobrado." },
   { q: "Posso pagar no Pix?", a: "Pode. No Pix mensal, todo mês chega um Pix para pagar e o app avisa antes de vencer. No Pix anual, você paga uma vez por ano com 10% de desconto." },
   { q: "Posso cancelar quando quiser?", a: "Sim. Em Planos, toque em “Cancelar assinatura”. Você continua com acesso até o fim do período já pago e não há novas cobranças." },
   { q: "Meus dados estão seguros?", a: "Sim. A conexão é criptografada, as senhas são cifradas, os documentos são guardados criptografados e cada pessoa só vê os próprios dados. O cartão é digitado na página segura do Asaas e não passa pelo Meu Organiza." },
@@ -96,7 +96,7 @@ export default function ConhecaPage() {
                 <Link href="/cadastro" className="rounded-2xl px-7 py-4 text-[17px] font-bold" style={{ background: Y, color: N }}>Testar 7 dias grátis</Link>
                 <a href={hasVideo ? "#video" : "#como-funciona"} className="rounded-2xl border px-7 py-4 text-[17px] font-semibold" style={{ borderColor: "rgba(246,245,240,.35)", color: C }}>{hasVideo ? "▶ Ver o vídeo" : "Ver como funciona"}</a>
               </div>
-              <p className="text-[14px]" style={{ color: M }}>Sem cartão para testar · Cancele quando quiser</p>
+              <p className="text-[14px]" style={{ color: M }}>7 dias grátis · Cancele quando quiser</p>
             </div>
             {/* celular */}
             <div className="mx-auto w-full max-w-[340px]">
@@ -201,7 +201,7 @@ export default function ConhecaPage() {
         <section id="planos" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
           <p className="text-[14px] font-bold uppercase tracking-[3px]" style={{ color: G }}>Planos</p>
           <h2 className="mt-2 font-display text-[36px] font-extrabold leading-tight sm:text-[46px]">Comece com 7 dias grátis.</h2>
-          <p className="mt-3 max-w-2xl text-[18px] leading-relaxed" style={{ color: B }}>Todas as funções liberadas no teste, sem cadastrar cartão. Depois, escolha o plano que combina com você.</p>
+          <p className="mt-3 max-w-2xl text-[18px] leading-relaxed" style={{ color: B }}>Cadastre o cartão e use tudo por 7 dias sem pagar nada. A primeira cobrança só acontece no 8º dia, e se cancelar antes, não paga nada.</p>
           <div className="mt-10 grid gap-5 md:grid-cols-3">
             {(["FREE", "PREMIUM", "FAMILY"] as const).map((p) => {
               const hot = p === "PREMIUM";
@@ -220,7 +220,7 @@ export default function ConhecaPage() {
               );
             })}
           </div>
-          <p className="mt-5 text-[14px]" style={{ color: B }}>Pague no cartão (cobrança automática), no Pix todo mês ou no Pix anual com 10% de desconto, pelo Asaas. Cancele quando quiser.</p>
+          <p className="mt-5 text-[14px]" style={{ color: B }}>No cartão, você testa 7 dias grátis e depois a cobrança é automática. Também dá para pagar no Pix todo mês ou no Pix anual com 10% de desconto, pelo Asaas. Cancele quando quiser.</p>
         </section>
 
         {/* instalar */}
@@ -289,7 +289,7 @@ export default function ConhecaPage() {
           <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 rounded-[36px] px-6 py-16 text-center" style={{ background: N, color: C }}>
             <Sym size={72} ring />
             <h2 className="font-display text-[34px] font-extrabold leading-tight sm:text-[48px]">Comece hoje a organizar<br /><span style={{ color: Y }}>sem esforço.</span></h2>
-            <p className="max-w-xl text-[18px]" style={{ color: M }}>7 dias grátis com tudo liberado. Sem cartão para testar.</p>
+            <p className="max-w-xl text-[18px]" style={{ color: M }}>7 dias grátis com tudo liberado. Cancele antes e não paga nada.</p>
             <Link href="/cadastro" className="rounded-2xl px-8 py-4 text-[18px] font-bold" style={{ background: Y, color: N }}>Criar minha conta grátis</Link>
           </div>
         </section>

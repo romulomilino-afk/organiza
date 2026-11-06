@@ -47,7 +47,7 @@ export const users = pgTable("users", {
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
   currency: text("currency").notNull().default("BRL"), // BRL | USD | EUR
   // teste grátis: todas as funções liberadas até esta data (contas novas: 7 dias a partir do cadastro)
-  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true, mode: "date" }).default(sql`now() + interval '7 days'`),
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true, mode: "date" }), // teste antigo, sem cartão (contas criadas antes de nov/2026)
   asaasCustomerId: text("asaas_customer_id"),
   phone: text("phone").unique(),                 // WhatsApp vinculado, formato E.164 sem "+"
   phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true, mode: "date" }),
@@ -387,7 +387,8 @@ export const billingSubscriptions = pgTable("billing_subscriptions", {
   overdueSince: date("overdue_since", { mode: "string" }),
   lastInvoiceUrl: text("last_invoice_url"),
   method: text("method").notNull().default("UNDEFINED"), // CREDIT_CARD (automático) | PIX (mensal) | PIX_YEARLY (anual) | UNDEFINED (antigo)
-  nextDueDate: date("next_due_date", { mode: "string" }), // Pix: cobrança do próximo período já gerada e ainda não paga
+  nextDueDate: date("next_due_date", { mode: "string" }),
+  trialEndsAt: date("trial_ends_at", { mode: "string" }), // teste grátis com cartão: primeira cobrança nesta data // Pix: cobrança do próximo período já gerada e ainda não paga
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [index("billing_user_idx").on(t.userId, t.status)]);

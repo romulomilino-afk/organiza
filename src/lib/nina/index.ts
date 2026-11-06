@@ -59,7 +59,7 @@ function gateByPlan(plan: PlanId, actions: Action[], trialEnded = false) {
   }
   const msg = trialEnded
     ? "Seu teste grátis acabou, e essa parte (financeiro, documentos e mais) agora faz parte dos planos Premium e Família. Assine em Planos para continuar."
-    : "Essa parte (financeiro, assinaturas ou garantias) faz parte do plano Premium.";
+    : "Essa parte (financeiro, assinaturas ou garantias) faz parte do plano Premium. Em Planos você pode testar 7 dias grátis.";
   return { allowed, note: blocked ? msg : "" };
 }
 
