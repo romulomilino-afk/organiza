@@ -8,7 +8,7 @@
  */
 import {
   customType,
-  pgTable, pgEnum, text, integer, boolean, timestamp, date, jsonb, primaryKey, index, uniqueIndex,
+  pgTable, pgEnum, text, integer, boolean, timestamp, date, jsonb, primaryKey, index, uniqueIndex, type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 import { sql } from "drizzle-orm";
@@ -203,6 +203,7 @@ export const expenses = pgTable("expenses", {
   dueDate: date("due_date", { mode: "string" }),   // contas a pagar
   paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),
   recurringItemId: text("recurring_item_id").references(() => recurringItems.id, { onDelete: "set null" }),
+  subscriptionId: text("subscription_id").references((): AnyPgColumn => subscriptions.id, { onDelete: "set null" }),
   householdId: text("household_id").references(() => households.id, { onDelete: "set null" }), // compartilhado com a família
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -210,6 +211,7 @@ export const expenses = pgTable("expenses", {
   index("expenses_user_date_idx").on(t.userId, t.date),
   index("expenses_user_status_idx").on(t.userId, t.status, t.dueDate),
   uniqueIndex("expenses_recurring_due_uq").on(t.recurringItemId, t.dueDate),
+  uniqueIndex("expenses_subscription_date_uq").on(t.subscriptionId, t.date),
 ]);
 
 export const income = pgTable("income", {
@@ -232,7 +234,11 @@ export const subscriptions = pgTable("subscriptions", {
   name: text("name").notNull(),
   amountCents: integer("amount_cents").notNull(),
   cycle: billingCycleEnum("cycle").notNull().default("MONTHLY"),
+  /** Próxima cobrança: nesse dia vira lançamento automático (na conta ou no cartão). */
   nextBilling: date("next_billing", { mode: "string" }),
+  billingDay: integer("billing_day"),
+  /** Cartão em que é cobrada; vazio = desconta da receita como uma conta normal. */
+  cardId: text("card_id").references((): AnyPgColumn => creditCards.id, { onDelete: "set null" }),
   active: boolean("active").notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -464,8 +470,9 @@ export const cardPurchases = pgTable("card_purchases", {
   purchaseDate: date("purchase_date", { mode: "string" }).notNull(),
   categoryKey: text("category_key").notNull().default("outros"),
   cancelled: boolean("cancelled").notNull().default(false),
+  subscriptionId: text("subscription_id").references((): AnyPgColumn => subscriptions.id, { onDelete: "set null" }),
   createdAt: createdAt(),
-}, (t) => [index("card_purchases_user_idx").on(t.userId, t.cardId)]);
+}, (t) => [index("card_purchases_user_idx").on(t.userId, t.cardId), uniqueIndex("card_purchases_subscription_date_uq").on(t.subscriptionId, t.purchaseDate)]);
 
 /** Uma linha por parcela, já na fatura (vencimento) em que ela cai. */
 export const cardInstallments = pgTable("card_installments", {

@@ -8,6 +8,7 @@ import { visible, type Access } from "../access";
 import { addDays, dateInMonth, addMonths, monthStart, monthEnd, todayIn } from "../dates";
 import { occursOn } from "../recurrence";
 import { monthCardSpend } from "../cards";
+import { ensureSubscriptionCharges } from "../subscriptions";
 
 export type Occurrence = { event: Event; day: string };
 
@@ -72,6 +73,8 @@ export async function ensureRecurringBills(db: DB, userId: string, today: string
     }
     await db.update(recurringItems).set({ generatedUntil: today }).where(eq(recurringItems.id, it.id));
   }
+  // assinaturas com dia de cobrança: lançadas no dia (na conta ou no cartão)
+  await ensureSubscriptionCharges(db, userId, today);
 }
 
 /** Receitas, despesas e contas fixas ativas, com os totais do mês. */

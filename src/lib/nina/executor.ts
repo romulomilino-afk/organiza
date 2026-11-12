@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { completeDeadline, ensureRoutines, onBought, remindFrom, upsertRoutine } from "../watch";
 import { addPurchase, bestDay, cancelPurchase, payInvoice, pickCard, recomputeCard, userCards } from "../cards";
+import { ensureSubscriptionCharges, followingCharge, nextChargeFrom } from "../subscriptions";
 
 const normName = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 import type { Action } from "./actions";
@@ -354,8 +355,16 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
     }
     case "add_subscription": {
       const cents = toCents(a.amount);
-      await db.insert(subscriptions).values({ userId, name: cap(a.name), amountCents: cents, cycle: a.cycle === "yearly" ? "YEARLY" : "MONTHLY" });
-      return { icon: "🔄", title: cap(a.name), lines: [`${brl(cents)} / ${a.cycle === "yearly" ? "ano" : "mês"}`] };
+      const cycle = a.cycle === "yearly" ? "YEARLY" : "MONTHLY";
+      const card = a.card ? pickCard(await userCards(db, userId), a.card) : null;
+      const when = a.next ? { nextBilling: a.next < today ? followingCharge(a.next, Number(a.next.slice(8, 10)), cycle) : a.next, billingDay: Number(a.next.slice(8, 10)) }
+        : a.day ? { nextBilling: nextChargeFrom(today, a.day), billingDay: a.day } : {};
+      await db.insert(subscriptions).values({ userId, name: cap(a.name), amountCents: cents, cycle, ...when, cardId: card?.id ?? null });
+      await ensureSubscriptionCharges(db, userId, today);
+      return { icon: "🔄", title: cap(a.name), lines: [
+        `${brl(cents)} / ${cycle === "YEARLY" ? "ano" : "mês"} · ${card ? `💳 cartão ${card.name}` : "💵 sai da receita"}`,
+        when.nextBilling ? `Lanço sozinha em Assinaturas · próxima cobrança ${fmtBR(when.nextBilling)}` : "Me diga o dia da cobrança para eu lançar sozinha",
+      ] };
     }
     case "cancel_subscription": {
       const [s] = await db.update(subscriptions).set({ active: false }).where(and(eq(subscriptions.id, a.id), eq(subscriptions.userId, userId))).returning();

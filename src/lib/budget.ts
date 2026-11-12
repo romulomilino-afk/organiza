@@ -3,16 +3,18 @@
  *
  * Receita do mês  = o que já entrou + receitas fixas que ainda vão cair este mês
  * Comprometido    = o que já saiu (inclui parcelas de cartão que vencem no mês)
- *                 + contas a pagar do mês + despesas fixas que ainda vão sair + assinaturas
+ *                 + contas a pagar do mês + despesas fixas que ainda vão sair
+ *                 + assinaturas que ainda vão cobrar (as automáticas já cobradas estão em "já gasto" ou na fatura)
  * Margem          = receita − comprometido
  * Livre p/ gastar = margem − folga (10% da receita, para imprevistos)
  */
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lte } from "drizzle-orm";
 import type { DB } from "@/db";
-import { expenses, recurringItems, subscriptions } from "@/db/schema";
+import { cardInstallments, cardPurchases, creditCards, expenses, recurringItems, subscriptions } from "@/db/schema";
 import { addMonths, dateInMonth, diffDays, monthEnd, monthStart, todayIn } from "./dates";
 import { monthFinance } from "./data/queries";
 import { monthCardSpend } from "./cards";
+import { pendingChargeInMonth } from "./subscriptions";
 import { brl } from "./money";
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -40,9 +42,16 @@ export async function monthBudget(db: DB, userId: string, today: string, tz = "A
   const pendingBillsCents = pend.reduce((a, b) => a + (b.amountCents ?? 0), 0);
 
   // assinaturas: só as que não estão já lançadas como fixo/despesa com o mesmo nome
-  const known = [...fixed.map((f) => norm(f.name)), ...fin.expenses.map((e) => norm(e.description)), ...pend.map((p) => norm(p.description))];
+  // (os lançamentos automáticos da própria assinatura não contam como "já lançado à parte")
+  const known = [...fixed.map((f) => norm(f.name)), ...fin.expenses.filter((e) => !e.subscriptionId).map((e) => norm(e.description)), ...pend.map((p) => norm(p.description))];
   const subsMonthly = subs.filter((s) => !known.some((k) => k.includes(norm(s.name)) || norm(s.name).includes(k)));
-  const subscriptionsCents = subsMonthly.reduce((a, s) => a + (s.cycle === "MONTHLY" ? s.amountCents : s.nextBilling && s.nextBilling >= from && s.nextBilling <= to ? s.amountCents : 0), 0);
+  const cards = new Map((await db.select().from(creditCards).where(and(eq(creditCards.userId, userId), eq(creditCards.active, true)))).map((c) => [c.id, c]));
+  const cardOf = (s: (typeof subs)[number]) => (s.cardId ? cards.get(s.cardId) ?? null : null);
+  const auto = (s: (typeof subs)[number]) => !!(s.billingDay && s.nextBilling);
+  // automáticas: só o que ainda vai cobrar e pesar neste mês; antigas (sem dia): reserva do valor cheio
+  const subscriptionsCents = subsMonthly.reduce((a, s) => a + (auto(s)
+    ? pendingChargeInMonth(s, cardOf(s), today, from, to)
+    : s.cycle === "MONTHLY" ? s.amountCents : s.nextBilling && s.nextBilling >= from && s.nextBilling <= to ? s.amountCents : 0), 0);
 
   const incomeCents = fin.incomeCents + expectedIncomeCents;
   const committedCents = fin.expenseCents + pendingBillsCents + fixedToComeCents + subscriptionsCents;
@@ -56,7 +65,13 @@ export async function monthBudget(db: DB, userId: string, today: string, tz = "A
   const card2 = await monthCardSpend(db, userId, n1, monthEnd(n1));
   const fixedIncome = fixed.filter((f) => f.kind === "INCOME").reduce((a, f) => a + (f.amountCents ?? 0), 0);
   const fixedOut = fixed.filter((f) => f.kind !== "INCOME").reduce((a, f) => a + (f.amountCents ?? 0), 0);
-  const subsNext = subsMonthly.reduce((a, s) => a + (s.cycle === "MONTHLY" ? s.amountCents : 0), 0);
+  // no cartão, o que já foi lançado e vence no mês que vem já está em card2
+  const subsInCard2 = new Set((await db.select({ id: cardPurchases.subscriptionId }).from(cardInstallments)
+    .innerJoin(cardPurchases, eq(cardPurchases.id, cardInstallments.purchaseId))
+    .where(and(eq(cardInstallments.userId, userId), isNotNull(cardPurchases.subscriptionId), gte(cardInstallments.dueDate, n1), lte(cardInstallments.dueDate, monthEnd(n1))))).map((r) => r.id));
+  const subsNext = subsMonthly.reduce((a, s) => a + (auto(s)
+    ? (subsInCard2.has(s.id) ? 0 : pendingChargeInMonth(s, cardOf(s), today, n1, monthEnd(n1)))
+    : s.cycle === "MONTHLY" ? s.amountCents : 0), 0);
   const nextMargin = fixedIncome - fixedOut - card2.total - subsNext;
 
   return {

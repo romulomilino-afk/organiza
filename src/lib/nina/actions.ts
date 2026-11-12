@@ -79,7 +79,8 @@ export const ActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("remove_shopping"), items }),
   z.object({ type: z.literal("check_shopping"), items }),
   // Casa (fase 2 na interface, já persistidos)
-  z.object({ type: z.literal("add_subscription"), name: txt(80), amount: reais, cycle: z.enum(["monthly", "yearly"]).default("monthly") }),
+  z.object({ type: z.literal("add_subscription"), name: txt(80), amount: reais, cycle: z.enum(["monthly", "yearly"]).default("monthly"),
+    day: z.coerce.number().int().min(1).max(31).nullish(), next: optDay, card: txt(40).nullish() }),
   z.object({ type: z.literal("cancel_subscription"), id: idRef }),
   z.object({ type: z.literal("add_warranty"), item: txt(80), months: z.coerce.number().int().min(1).max(240), purchaseDate: optDay }),
   z.object({ type: z.literal("add_document"), name: txt(120),

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { getDb } from "@/db";
+import { and, eq } from "drizzle-orm";
+import { creditCards } from "@/db/schema";
 import { requirePageAccess } from "@/lib/session";
 import { MESES, relDay, todayIn, fmtShort } from "@/lib/dates";
 import { brl, METHOD_LABEL } from "@/lib/money";
@@ -68,6 +70,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
     ...fin.expenses.map((e) => ({ id: e.id, kind: "expense" as const, date: e.date, cents: e.amountCents ?? 0, desc: e.description, cat: e.categoryKey, method: e.method, at: e.createdAt, fixed: !!e.recurringItemId })),
     ...fin.incomes.map((i) => ({ id: i.id, kind: "income" as const, date: i.date, cents: i.amountCents, desc: i.description, cat: i.categoryKey, method: null, at: i.createdAt, fixed: !!i.recurringItemId })),
   ].sort((a, b) => b.date.localeCompare(a.date) || b.at.getTime() - a.at.getTime()).slice(0, 40);
+  const subCards = new Map((await db.select({ id: creditCards.id, name: creditCards.name }).from(creditCards).where(and(eq(creditCards.userId, user.id), eq(creditCards.active, true)))).map((c) => [c.id, c.name]));
   const subsMonthly = subs.reduce((a, s) => a + (s.cycle === "YEARLY" ? s.amountCents / 12 : s.amountCents), 0);
 
   return (
@@ -130,7 +133,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
                   <span>Já gasto (inclui parcelas do mês)</span><b className="num">− {brl(budget.spentCents)}</b>
                   {budget.pendingBillsCents > 0 && <><span>Contas a pagar</span><b className="num">− {brl(budget.pendingBillsCents)}</b></>}
                   {budget.fixedToComeCents > 0 && <><span>Despesas fixas que ainda vão sair</span><b className="num">− {brl(budget.fixedToComeCents)}</b></>}
-                  {budget.subscriptionsCents > 0 && <><span>Assinaturas</span><b className="num">− {brl(budget.subscriptionsCents)}</b></>}
+                  {budget.subscriptionsCents > 0 && <><span>Assinaturas que ainda vão cobrar</span><b className="num">− {brl(budget.subscriptionsCents)}</b></>}
                   <span className="border-t border-line pt-1 font-semibold">Margem do mês</span><b className="num border-t border-line pt-1">{brl(budget.marginCents)}</b>
                   <span className="text-ink-3">Folga para imprevistos (10% da renda)</span><b className="num text-ink-3">− {brl(budget.cushionCents)}</b>
                   <span className="text-ink-3">Mês que vem (previsto)</span><b className="num text-ink-3">{brl(budget.next.marginCents)}</b>
@@ -340,7 +343,9 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
           <div className="card">
             <div className="eyebrow mb-2">🔄 Assinaturas</div>
             {subs.map((s) => (
-              <div key={s.id} className="row"><div className="min-w-0 flex-1 font-medium">{s.name}</div><span className="num font-semibold">{brl(s.amountCents)}{s.cycle === "YEARLY" ? "/ano" : ""}</span></div>
+              <div key={s.id} className="row"><div className="min-w-0 flex-1 font-medium">{s.name}
+                <div className="text-[13px] font-normal text-ink-3">{s.cardId && subCards.has(s.cardId) ? `💳 Cartão ${subCards.get(s.cardId)}` : "💵 Desconta da receita"}{s.billingDay && s.nextBilling ? ` · lanço sozinha dia ${s.billingDay}` : " · sem dia de cobrança"}</div></div>
+                <span className="num font-semibold">{brl(s.amountCents)}{s.cycle === "YEARLY" ? "/ano" : ""}</span></div>
             ))}
             <div className="mt-2 grid grid-cols-2 gap-3 border-t border-line pt-3 text-sm">
               <div><div className="text-ink-3">Total mensal</div><b className="num">{brl(Math.round(subsMonthly))}</b></div>

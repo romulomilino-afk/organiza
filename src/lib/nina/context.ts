@@ -114,7 +114,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
       total_despesas: fixos.expenseCents / 100,
       sobra_prevista: fixos.leftoverCents / 100,
     },
-    assinaturas: subs.map((s) => ({ id: s.id, name: s.name, amount: s.amountCents / 100, cycle: s.cycle })),
+    assinaturas: subs.map((s) => ({ id: s.id, name: s.name, amount: s.amountCents / 100, cycle: s.cycle, proxima_cobranca: s.nextBilling, automatica: !!(s.billingDay && s.nextBilling), cobrada_no_cartao: !!s.cardId })),
     ...(withHistory ? { meses_anteriores: history, reserva: reserve / 100 } : {}),
     financeiro_do_mes: {
       receitas: fin.incomeCents / 100,

@@ -4,12 +4,29 @@ import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { documents, subscriptions, warranties, userPreferences } from "@/db/schema";
+import { creditCards, documents, subscriptions, warranties, userPreferences } from "@/db/schema";
 import { requireAccess, requireUser } from "@/lib/session";
 import { addMonths, cap, isISODate, isTime, todayIn } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 import { hasFeature } from "@/lib/plans";
 import { deleteFile } from "@/lib/storage";
+import { ensureSubscriptionCharges, followingCharge } from "@/lib/subscriptions";
+
+/** "Como é paga": "conta" (desconta da receita) ou o id de um cartão do usuário. */
+async function payWith(userId: string, v: FormDataEntryValue | null): Promise<string | null> {
+  const s = String(v ?? "");
+  if (!s || s === "conta") return null;
+  const [c] = await getDb().select({ id: creditCards.id }).from(creditCards).where(and(eq(creditCards.id, s.slice(0, 64)), eq(creditCards.userId, userId))).limit(1);
+  return c?.id ?? null;
+}
+
+/** Próxima cobrança informada; se já passou, vai para a seguinte (não lança cobrança antiga). */
+function nextFrom(date: string, today: string, cycle: "MONTHLY" | "YEARLY") {
+  const day = Number(date.slice(8, 10));
+  let d = date;
+  for (let i = 0; d < today && i < 40; i++) d = followingCharge(d, day, cycle);
+  return { nextBilling: d, billingDay: day };
+}
 
 const id = z.string().min(1).max(64);
 const refresh = () => revalidatePath("/", "layout");
@@ -45,9 +62,32 @@ export async function addSubscription(form: FormData) {
     name: z.string().trim().min(1).max(80),
     amount: z.string().transform((v) => Number(v.replace(/\./g, "").replace(",", "."))).pipe(z.number().positive().max(100000)),
     cycle: z.enum(["MONTHLY", "YEARLY"]).default("MONTHLY"),
-  }).safeParse({ name: form.get("name"), amount: String(form.get("amount") ?? ""), cycle: form.get("cycle") || undefined });
+    next: z.string().optional(),
+  }).safeParse({ name: form.get("name"), amount: String(form.get("amount") ?? ""), cycle: form.get("cycle") || undefined, next: form.get("next") || undefined });
   if (!p.success) return;
-  await getDb().insert(subscriptions).values({ userId: user.id, name: cap(p.data.name), amountCents: toCents(p.data.amount), cycle: p.data.cycle });
+  const today = todayIn(user.timezone);
+  const when = p.data.next && isISODate(p.data.next) ? nextFrom(p.data.next, today, p.data.cycle) : {};
+  await getDb().insert(subscriptions).values({ userId: user.id, name: cap(p.data.name), amountCents: toCents(p.data.amount), cycle: p.data.cycle,
+    ...when, cardId: await payWith(user.id, form.get("pay")) });
+  await ensureSubscriptionCharges(getDb(), user.id, today);
+  refresh();
+}
+
+export async function updateSubscription(form: FormData) {
+  const { user, access } = await requireAccess();
+  if (!hasFeature(access.plan, "assinaturas")) return;
+  const p = z.object({
+    id,
+    amount: z.string().transform((v) => Number(v.replace(/\./g, "").replace(",", "."))).pipe(z.number().positive().max(100000)),
+    cycle: z.enum(["MONTHLY", "YEARLY"]),
+    next: z.string().optional(),
+  }).safeParse({ id: form.get("id"), amount: String(form.get("amount") ?? ""), cycle: form.get("cycle"), next: form.get("next") || undefined });
+  if (!p.success) return;
+  const today = todayIn(user.timezone);
+  const when = p.data.next && isISODate(p.data.next) ? nextFrom(p.data.next, today, p.data.cycle) : {};
+  await getDb().update(subscriptions).set({ amountCents: toCents(p.data.amount), cycle: p.data.cycle, ...when, cardId: await payWith(user.id, form.get("pay")) })
+    .where(and(eq(subscriptions.id, p.data.id), eq(subscriptions.userId, user.id)));
+  await ensureSubscriptionCharges(getDb(), user.id, today);
   refresh();
 }
 

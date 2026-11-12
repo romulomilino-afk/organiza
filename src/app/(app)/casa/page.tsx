@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { getDb } from "@/db";
 import { requirePageAccess } from "@/lib/session";
-import { diffDays, fmtBR, todayIn } from "@/lib/dates";
+import { diffDays, fmtBR, fmtShort, todayIn } from "@/lib/dates";
+import { userCards } from "@/lib/cards";
+import { ensureSubscriptionCharges } from "@/lib/subscriptions";
 import { brl } from "@/lib/money";
 import { hasFeature, type Feature } from "@/lib/plans";
 import { activeSubscriptions, listDocuments, listWarranties, shoppingChecked, shoppingOpen } from "@/lib/data/queries";
 import { addShopping, clearCheckedShopping, deleteShopping, toggleShopping } from "@/actions/items";
-import { addSubscription, addWarranty, cancelSubscription, deleteDocument, deleteWarranty } from "@/actions/casa";
+import { addSubscription, addWarranty, cancelSubscription, deleteDocument, deleteWarranty, updateSubscription } from "@/actions/casa";
 import { CheckButton, Empty, PageHeader, XButton } from "@/components/ui";
 import { DocumentUpload } from "@/components/DocumentUpload";
 
@@ -85,26 +87,68 @@ export default async function CasaPage({ searchParams }: { searchParams: Promise
   } else if (tab === "assinaturas") {
     if (!can("assinaturas")) body = <Premium what="Controlar assinaturas" />;
     else {
-      const subs = await activeSubscriptions(db, user.id);
+      await ensureSubscriptionCharges(db, user.id, today);
+      const [subs, cards] = await Promise.all([activeSubscriptions(db, user.id), userCards(db, user.id)]);
+      const cardName = new Map(cards.map((c) => [c.id, c.name]));
+      const payLabel = (cardId: string | null) => (cardId && cardName.has(cardId) ? `💳 Cartão ${cardName.get(cardId)}` : "💵 Desconta da receita");
+      const PayField = ({ value }: { value?: string | null }) => (
+        <label className="flex flex-col gap-1 text-[13px] font-semibold text-ink-2">Como é paga
+          <select name="pay" defaultValue={value && cardName.has(value) ? value : "conta"} className="field py-2.5 font-normal" aria-label="Como é paga">
+            <option value="conta">💵 Desconta da receita (conta normal)</option>
+            {cards.map((c) => <option key={c.id} value={c.id}>💳 Cartão de crédito {c.name}</option>)}
+          </select>
+        </label>
+      );
       const monthly = subs.reduce((a, s) => a + (s.cycle === "YEARLY" ? s.amountCents / 12 : s.amountCents), 0);
       body = (<>
         <div className="card mb-3 grid grid-cols-2 gap-3">
           <div><div className="text-[13px] font-semibold text-ink-3">Total mensal</div><div className="num font-display text-[24px] font-semibold">{brl(Math.round(monthly))}</div></div>
           <div><div className="text-[13px] font-semibold text-ink-3">Total anual estimado</div><div className="num font-display text-[24px] font-semibold">{brl(Math.round(monthly * 12))}</div></div>
         </div>
-        <form action={addSubscription} className="card mb-3 grid grid-cols-2 gap-2 min-[420px]:grid-cols-[1fr_100px_110px_auto]">
-          <input name="name" required maxLength={80} placeholder="Ex.: Netflix" aria-label="Assinatura" className="field col-span-2 min-w-0 py-2.5 min-[420px]:col-span-1" />
-          <input name="amount" required inputMode="decimal" placeholder="39,90" aria-label="Valor" className="field py-2.5" />
-          <select name="cycle" aria-label="Frequência" className="field py-2.5"><option value="MONTHLY">Mensal</option><option value="YEARLY">Anual</option></select>
-          <button className="btn col-span-2 min-[420px]:col-span-1">Adicionar</button>
+        <form action={addSubscription} className="card mb-3 flex flex-col gap-2">
+          <div className="eyebrow">Nova assinatura</div>
+          <input name="name" required maxLength={80} placeholder="Ex.: Netflix" aria-label="Assinatura" className="field min-w-0 py-2.5" />
+          <div className="grid grid-cols-2 gap-2">
+            <input name="amount" required inputMode="decimal" placeholder="Valor (ex.: 39,90)" aria-label="Valor" className="field py-2.5" />
+            <select name="cycle" aria-label="Frequência" className="field py-2.5"><option value="MONTHLY">Mensal</option><option value="YEARLY">Anual</option></select>
+          </div>
+          <label className="flex flex-col gap-1 text-[13px] font-semibold text-ink-2">Próxima cobrança
+            <input name="next" type="date" required min={today} className="field py-2.5 font-normal" aria-label="Próxima cobrança" />
+          </label>
+          <PayField />
+          <p className="text-[13px] text-ink-3">No dia da cobrança eu lanço sozinha em Assinaturas: {cards.length ? "na fatura do cartão escolhido ou " : ""}como saída da sua receita.</p>
+          <button className="btn">Adicionar</button>
         </form>
         <div className="card">
           {subs.length ? subs.map((s) => (
-            <div key={s.id} className="row">
-              <span className="text-xl">🔄</span>
-              <div className="min-w-0 flex-1 font-medium">{s.name}<div className="text-[13px] font-normal text-ink-3">{s.cycle === "YEARLY" ? "Anual" : "Mensal"}</div></div>
-              <span className="num font-semibold">{brl(s.amountCents)}</span>
-              <XButton action={cancelSubscription.bind(null, s.id)} label={`Cancelar ${s.name}`} />
+            <div key={s.id} className="border-b border-line py-2.5 last:border-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🔄</span>
+                <div className="min-w-0 flex-1 font-medium">{s.name}
+                  <div className="text-[13px] font-normal text-ink-3">
+                    {s.cycle === "YEARLY" ? "Anual" : "Mensal"} · {payLabel(s.cardId)}
+                    {s.billingDay && s.nextBilling ? <> · próxima {fmtShort(s.nextBilling)}</> : null}
+                  </div>
+                </div>
+                <span className="num font-semibold">{brl(s.amountCents)}</span>
+                <XButton action={cancelSubscription.bind(null, s.id)} label={`Cancelar ${s.name}`} />
+              </div>
+              {!(s.billingDay && s.nextBilling) && <p className="ml-9 mt-1 rounded-lg bg-warn-soft px-2 py-1 text-[12px]">Informe a próxima cobrança para eu lançar sozinha todo mês.</p>}
+              <details className="ml-9 mt-1" open={!(s.billingDay && s.nextBilling)}>
+                <summary className="cursor-pointer text-[13px] font-semibold text-accent">✏️ Editar cobrança</summary>
+                <form action={updateSubscription} className="mt-2 flex flex-col gap-2">
+                  <input type="hidden" name="id" value={s.id} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input name="amount" required inputMode="decimal" defaultValue={(s.amountCents / 100).toFixed(2).replace(".", ",")} aria-label="Valor" className="field py-2" />
+                    <select name="cycle" defaultValue={s.cycle} aria-label="Frequência" className="field py-2"><option value="MONTHLY">Mensal</option><option value="YEARLY">Anual</option></select>
+                  </div>
+                  <label className="flex flex-col gap-1 text-[13px] font-semibold text-ink-2">Próxima cobrança
+                    <input name="next" type="date" required min={today} defaultValue={s.nextBilling ?? ""} className="field py-2 font-normal" />
+                  </label>
+                  <PayField value={s.cardId} />
+                  <button className="btn">Salvar</button>
+                </form>
+              </details>
             </div>
           )) : <Empty>Diga “Assino Netflix por 39,90 por mês” ou adicione acima.</Empty>}
         </div>

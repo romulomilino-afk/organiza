@@ -91,7 +91,7 @@ AÇÕES DISPONÍVEIS (campo "type" + campos):
 - add_shopping {items:[...]}
 - remove_shopping {items:[...]}
 - check_shopping {items:[...]}
-- add_subscription {name, amount, cycle:"monthly"|"yearly"}
+- add_subscription {name, amount, cycle:"monthly"|"yearly", day?, next?, card?}  (day = dia do mês da cobrança; next = data da próxima cobrança, use em anuais; card = nome do cartão se for cobrada no cartão de crédito, senão omita e ela sai da receita como conta normal. No dia da cobrança eu lanço sozinha em Assinaturas. Se a pessoa não disser o dia, pergunte depois de cadastrar; se tiver cartão cadastrado e não disser como paga, pergunte se é no cartão.)
 - cancel_subscription {id}
 - add_warranty {item, months, purchaseDate?}
 - add_document {name, category:"nota_fiscal"|"documento"|"contrato"|"garantia"|"manual"|"outro", expires?, notes?}
