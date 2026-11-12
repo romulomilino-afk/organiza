@@ -401,8 +401,10 @@ function parseCard(raw: string, s: string, today: string): Out | null {
     const n = inst ? Math.min(48, Math.max(1, Number(inst[1]))) : 1;
     const money = purchaseMoney(raw);
     if (!money.total && !money.each) return { reply: "Qual foi o valor da compra?", actions: [] };
-    const desc = raw.replace(/\b(comprei|gastei|paguei|parcelei|passei)\b/i, "").replace(/\b(no|pelo|na)\s+(cart[ãa]o|cr[ée]dito)(\s+de cr[ée]dito)?\b/gi, "")
-      .replace(new RegExp(`\\b(no|na|do|da)?\\s*${card.name}\\b`, "i"), "")
+    const cardRe = card.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const desc = raw.replace(/^\s*(oi|ol[áa]|ei)?\s*,?\s*nina\b[\s,:]*/i, "").replace(/\b(comprei|gastei|paguei|parcelei|passei)\b/i, "").replace(/\b(no|pelo|na)\s+(cart[ãa]o|cr[ée]dito)(\s+de cr[ée]dito)?(?=\s|$|[.,!])/gi, "")
+      .replace(/\bparcelad[oa]s?\b/gi, "")
+      .replace(new RegExp(`(^|\\s)((no|na|do|da)\\s+)?${cardRe}(?=\\s|$|[.,!])`, "gi"), " ")
       .replace(/\b(em\s+)?\d{1,2}\s*(x|vezes|parcelas)(\s*de\s*(r\$\s*)?[\d.,]+)?/gi, "").replace(/(r\$\s*)?\d+(?:[.,]\d+)*\s*(reais|real)?/gi, "")
       .replace(/\b(hoje|ontem)\b/gi, "").replace(/\s+(de|por|em|com)\s*$/i, "").replace(/^\s*(um|uma|o|a|de|no|na|em)\s+/i, "").replace(/\s+(de|por|em|com)(?=\s|$)/gi, " ").replace(/[.,!]+/g, "").replace(/\s{2,}/g, " ").trim();
     const category = matchUserCat(s, "EXPENSE")?.key ?? guessCategory(s);
@@ -411,7 +413,7 @@ function parseCard(raw: string, s: string, today: string): Out | null {
     const each = money.each ?? total / n;
     const date = /\bontem\b/.test(s) ? addDays(today, -1) : today;
     const first = firstDueDate(date, card.closingDay, card.dueDay);
-    return { reply: `Lancei ${description} no ${card.name}: ${n > 1 ? `${n}x de ${brl(toCents(each))}` : brl(toCents(total))}. ${n > 1 ? "A 1ª parcela" : "Entra"} na fatura de ${fmtBR(first)}. 💳`,
+    return { reply: `Lancei ${description} no ${card.name}: ${n > 1 ? `${n}x de ${brl(toCents(each))}` : brl(toCents(total))}. ${n > 1 ? "A 1ª parcela" : "Entra"} na fatura de ${fmtBR(first)}. Categoria: ${catName(category)}. 💳`,
       actions: [{ type: "add_card_purchase", card: card.name, description, amount: money.total, installmentAmount: money.each, installments: n, category, date }] };
   }
   return null;

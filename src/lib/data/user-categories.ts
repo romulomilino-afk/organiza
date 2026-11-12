@@ -4,7 +4,7 @@
  */
 import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import type { DB } from "@/db";
-import { categories, expenses, income, recurringItems } from "@/db/schema";
+import { cardPurchases, categories, expenses, income, recurringItems } from "@/db/schema";
 import { CATEGORIES, EXPENSE_KEYS, INCOME_KEYS } from "../categories";
 
 export type Cat = { key: string; name: string; emoji: string; kind: "EXPENSE" | "INCOME"; custom: boolean; keywords: string[] };
@@ -96,6 +96,12 @@ export async function moveByKeywords(db: DB, userId: string, cat: Cat): Promise<
     const ids = rows.filter((r) => hit(r.d)).map((r) => r.id);
     if (ids.length) await db.update(expenses).set({ categoryKey: cat.key }).where(and(eq(expenses.userId, userId), inArray(expenses.id, ids)));
     moved = ids.length;
+    // compras no cartão de crédito também mudam de categoria
+    const cps = await db.select({ id: cardPurchases.id, d: cardPurchases.description }).from(cardPurchases)
+      .where(and(eq(cardPurchases.userId, userId), ne(cardPurchases.categoryKey, cat.key))).limit(5000);
+    const cids = cps.filter((r) => hit(r.d)).map((r) => r.id);
+    if (cids.length) await db.update(cardPurchases).set({ categoryKey: cat.key }).where(and(eq(cardPurchases.userId, userId), inArray(cardPurchases.id, cids)));
+    moved += cids.length;
   } else {
     const rows = await db.select({ id: income.id, d: income.description }).from(income)
       .where(and(eq(income.userId, userId), ne(income.categoryKey, cat.key))).limit(5000);

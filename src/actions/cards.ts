@@ -3,16 +3,17 @@
  * Cartões pela tela: mesmas regras e validação das ações da Nina.
  */
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { creditCards } from "@/db/schema";
+import { cardPurchases, creditCards } from "@/db/schema";
 import { requireAccess } from "@/lib/session";
 import { hasFeature } from "@/lib/plans";
 import { isISODate, todayIn } from "@/lib/dates";
 import { ActionSchema } from "@/lib/nina/actions";
 import { executeActions } from "@/lib/nina/executor";
-import { payInvoice } from "@/lib/cards";
+import { payInvoice, setPurchaseCategory } from "@/lib/cards";
+import { loadCategories } from "@/lib/data/user-categories";
 import { guessCategory } from "@/lib/nina/fallback";
 
 const refresh = () => { revalidatePath("/", "layout"); };
@@ -39,7 +40,7 @@ export async function addPurchaseForm(form: FormData) {
   const g = await guard(); if (!g) return;
   const { user, access, today } = g;
   const f = z.object({ cardId: z.string().min(1).max(64), description: z.string().trim().min(1).max(120), amount: money,
-    installments: z.coerce.number().int().min(1).max(48), date: z.string().optional() }).safeParse(Object.fromEntries(form));
+    installments: z.coerce.number().int().min(1).max(48), date: z.string().optional(), category: z.string().max(64).optional() }).safeParse(Object.fromEntries(form));
   if (!f.success) return;
   const [card] = await getDb().select().from(creditCards).where(and(eq(creditCards.id, f.data.cardId), eq(creditCards.userId, user.id))).limit(1);
   if (!card) return;
@@ -48,6 +49,23 @@ export async function addPurchaseForm(form: FormData) {
     type: "add_card_purchase", card: card.name, description: f.data.description, amount: f.data.amount, installments: f.data.installments,
     date: f.data.date && isISODate(f.data.date) && f.data.date <= today ? f.data.date : undefined, category: guessCategory(norm),
   })]);
+  // categoria escolhida na tela vale mais que a automática
+  const chosen = f.data.category ? (await loadCategories(getDb(), user.id)).find(f.data.category) : null;
+  if (chosen && chosen.kind === "EXPENSE") {
+    const [p] = await getDb().select({ id: cardPurchases.id }).from(cardPurchases)
+      .where(and(eq(cardPurchases.userId, user.id), eq(cardPurchases.cardId, card.id))).orderBy(desc(cardPurchases.createdAt)).limit(1);
+    if (p) await setPurchaseCategory(getDb(), user.id, p.id, chosen.key);
+  }
+  refresh();
+}
+
+export async function updatePurchaseCategoryAction(form: FormData) {
+  const g = await guard(); if (!g) return;
+  const f = z.object({ purchaseId: z.string().min(1).max(64), category: z.string().min(1).max(64) }).safeParse(Object.fromEntries(form));
+  if (!f.success) return;
+  const cat = (await loadCategories(getDb(), g.user.id)).find(f.data.category);
+  if (!cat || cat.kind !== "EXPENSE") return;
+  await setPurchaseCategory(getDb(), g.user.id, f.data.purchaseId, cat.key);
   refresh();
 }
 

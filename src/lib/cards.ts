@@ -122,17 +122,34 @@ export async function cardsOverview(db: DB, userId: string, today: string) {
     const open = invs.find((i) => i.status === "aberta") ?? null;
     const usedCents = unpaid.reduce((a, i) => a + i.totalCents, 0);
     // compras com parcelas ainda em faturas não pagas
-    const pm = new Map<string, { purchaseId: string; description: string; of: number; amountCents: number; next: number; remaining: number; lastDue: string; remainingCents: number }>();
+    const pm = new Map<string, { purchaseId: string; description: string; of: number; amountCents: number; next: number; remaining: number; lastDue: string; remainingCents: number; categoryKey: string }>();
     for (const i of unpaid) for (const it of i.items) {
-      const p = pm.get(it.purchaseId) ?? { purchaseId: it.purchaseId, description: it.description, of: it.of, amountCents: it.amountCents, next: it.number, remaining: 0, lastDue: i.dueDate, remainingCents: 0 };
+      const p = pm.get(it.purchaseId) ?? { purchaseId: it.purchaseId, description: it.description, of: it.of, amountCents: it.amountCents, next: it.number, remaining: 0, lastDue: i.dueDate, remainingCents: 0, categoryKey: it.categoryKey };
       p.next = Math.min(p.next, it.number); p.remaining++; p.remainingCents += it.amountCents;
       if (i.dueDate > p.lastDue) p.lastDue = i.dueDate;
       pm.set(it.purchaseId, p);
     }
     const purchases = [...pm.values()].sort((a, b) => b.lastDue.localeCompare(a.lastDue));
     const upcoming = unpaid.filter((i) => i.status === "aberta" || i.dueDate > (toPay?.dueDate ?? "")).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 6);
-    return { card, best: bestDay(card, today), toPay, open, upcoming, usedCents, purchases };
+    // gastos por categoria: fatura aberta (o que está gastando agora) e tudo que ainda vai pagar neste cartão
+    const openByCategory = sumByCategory(open ? open.items : []);
+    const unpaidByCategory = sumByCategory(unpaid.flatMap((i) => i.items));
+    return { card, best: bestDay(card, today), toPay, open, upcoming, usedCents, purchases, openByCategory, unpaidByCategory };
   });
+}
+
+/** Soma por categoria, da maior para a menor. */
+export function sumByCategory(items: { categoryKey: string; amountCents: number }[]): { key: string; cents: number }[] {
+  const m = new Map<string, number>();
+  for (const it of items) m.set(it.categoryKey, (m.get(it.categoryKey) ?? 0) + it.amountCents);
+  return [...m.entries()].map(([key, cents]) => ({ key, cents })).sort((a, b) => b.cents - a.cents);
+}
+
+/** Troca a categoria de uma compra no cartão (vale para todas as parcelas). */
+export async function setPurchaseCategory(db: DB, userId: string, purchaseId: string, categoryKey: string) {
+  const r = await db.update(cardPurchases).set({ categoryKey })
+    .where(and(eq(cardPurchases.id, purchaseId), eq(cardPurchases.userId, userId))).returning({ id: cardPurchases.id });
+  return r.length > 0;
 }
 
 /** Parcelas que vencem no mês (entram nos gastos do mês e nas categorias). */

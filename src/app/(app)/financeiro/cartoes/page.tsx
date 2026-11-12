@@ -4,9 +4,10 @@ import { requirePageAccess } from "@/lib/session";
 import { MESES, fmtBR, fmtShort, todayIn } from "@/lib/dates";
 import { brl, CURRENCIES, currentCurrency } from "@/lib/money";
 import { hasFeature, PLANS } from "@/lib/plans";
-import { cardsOverview, firstDueDate, type Invoice } from "@/lib/cards";
+import { cardsOverview, firstDueDate, sumByCategory, type Invoice } from "@/lib/cards";
 import { loadCategories } from "@/lib/data/user-categories";
-import { addCardForm, addPurchaseForm, cancelPurchaseAction, deleteCardAction, payInvoiceAction } from "@/actions/cards";
+import { addCardForm, addPurchaseForm, cancelPurchaseAction, deleteCardAction, payInvoiceAction, updatePurchaseCategoryAction } from "@/actions/cards";
+import { CategoryPicker } from "@/components/CategoryPicker";
 import { Empty, PageHeader, SmallButton, XButton } from "@/components/ui";
 import { FinanceTabs } from "@/components/FinanceTabs";
 
@@ -37,6 +38,36 @@ export default async function CartoesPage() {
   const today = todayIn(user.timezone);
   const [cards, cats] = await Promise.all([cardsOverview(db, user.id, today), loadCategories(db, user.id)]);
 
+  const expenseCats = cats.expense().map((c) => ({ key: c.key, name: c.name, emoji: c.emoji }));
+
+  /** Barras de gasto por categoria (emoji, nome, valor e % do total). */
+  const ByCategory = ({ rows }: { rows: { key: string; cents: number }[] }) => {
+    const total = rows.reduce((a, r) => a + r.cents, 0) || 1;
+    return (
+      <div className="mt-1 flex flex-col gap-2">
+        {rows.map((r) => {
+          const c = cats.get(r.key);
+          const pct = Math.round((r.cents / total) * 100);
+          return (
+            <div key={r.key}>
+              <div className="flex items-baseline gap-2 text-sm">
+                <span>{c.emoji}</span>
+                <span className="min-w-0 flex-1 font-medium">{c.name}</span>
+                <span className="text-[12px] text-ink-3">{pct}%</span>
+                <span className="num w-24 text-right font-semibold">{brl(r.cents)}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2"><i className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(2, pct)}%` }} /></div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // todos os cartões juntos: fatura aberta de cada um
+  const allOpen = sumByCategory(cards.flatMap((c) => c.open?.items ?? []));
+  const allOpenTotal = allOpen.reduce((a, r) => a + r.cents, 0);
+
   const InvoiceItems = ({ inv }: { inv: Invoice }) => (
     <details className="mt-1">
       <summary className="cursor-pointer text-[13px] font-semibold text-accent">Ver {inv.items.length} {inv.items.length === 1 ? "item" : "itens"}</summary>
@@ -65,7 +96,18 @@ export default async function CartoesPage() {
           </div>
         )}
 
-        {cards.map(({ card, best, toPay, open, upcoming, usedCents, purchases }) => {
+        {cards.length > 1 && allOpen.length > 0 && (
+          <div className="card">
+            <div className="flex items-center justify-between gap-2">
+              <div className="eyebrow">Todos os cartões por categoria</div>
+              <span className="num text-sm font-semibold">{brl(allOpenTotal)}</span>
+            </div>
+            <p className="text-[13px] text-ink-3">Soma das faturas abertas de {cards.length} cartões.</p>
+            <ByCategory rows={allOpen} />
+          </div>
+        )}
+
+        {cards.map(({ card, best, toPay, open, upcoming, usedCents, purchases, openByCategory, unpaidByCategory }) => {
           const pct = card.limitCents ? Math.min(100, Math.round((usedCents / card.limitCents) * 100)) : null;
           const next = upcoming.filter((i) => i.dueDate > (open?.dueDate ?? toPay?.dueDate ?? today));
           const maxNext = Math.max(...next.map((i) => i.totalCents), 1);
@@ -124,6 +166,24 @@ export default async function CartoesPage() {
                 ) : <Empty>Nada na fatura aberta ainda.</Empty>}
               </div>
 
+              {(openByCategory.length > 0 || unpaidByCategory.length > 0) && (
+                <div className="card">
+                  <div className="eyebrow">Gastos por categoria · {card.name}</div>
+                  {openByCategory.length > 0 ? (
+                    <>
+                      <p className="text-[13px] text-ink-3">Fatura aberta (vence {fmtShort(open!.dueDate)})</p>
+                      <ByCategory rows={openByCategory} />
+                    </>
+                  ) : <p className="text-[13px] text-ink-3">Nada na fatura aberta.</p>}
+                  {unpaidByCategory.length > 0 && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-[13px] font-semibold text-accent">Ver tudo que ainda vai pagar neste cartão ({brl(usedCents)})</summary>
+                      <ByCategory rows={unpaidByCategory} />
+                    </details>
+                  )}
+                </div>
+              )}
+
               {next.length > 0 && (
                 <div className="card">
                   <div className="eyebrow mb-1">Próximas faturas</div>
@@ -143,6 +203,7 @@ export default async function CartoesPage() {
                   <div key={p.purchaseId} className="row">
                     <div className="min-w-0 flex-1">
                       <div className="font-medium [overflow-wrap:anywhere]">{p.description}</div>
+                      <div className="my-0.5"><CategoryPicker action={updatePurchaseCategoryAction} purchaseId={p.purchaseId} value={p.categoryKey} options={expenseCats} label={`Categoria de ${p.description}`} /></div>
                       <div className="text-[13px] text-ink-3">Parcela {p.next}/{p.of} · {brl(p.amountCents)}/mês · termina em {mesAno(p.lastDue)}</div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2"><i className="block h-full rounded-full bg-accent" style={{ width: `${((p.of - p.remaining) / p.of) * 100}%` }} /></div>
                     </div>
@@ -194,6 +255,10 @@ export default async function CartoesPage() {
                   {Array.from({ length: 24 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? "À vista" : `${n}x`}</option>)}
                 </select>
               </div>
+              <select name="category" className="field" defaultValue="" aria-label="Categoria">
+                <option value="">🪄 Categoria automática</option>
+                {expenseCats.map((c) => <option key={c.key} value={c.key}>{c.emoji} {c.name}</option>)}
+              </select>
               <input name="date" type="date" max={today} defaultValue={today} className="field" aria-label="Data da compra" />
               <button className="btn">Lançar compra</button>
             </form>
