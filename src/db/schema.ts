@@ -460,6 +460,36 @@ export const creditCards = pgTable("credit_cards", {
   createdAt: createdAt(),
 }, (t) => [index("credit_cards_user_idx").on(t.userId, t.active)]);
 
+/** Vale-alimentação / vale-refeição da empresa: recebe um crédito todo mês e tem saldo próprio (não é receita). */
+export const benefitCards = pgTable("benefit_cards", {
+  id: id(),
+  userId: userId(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("ALIMENTACAO"),     // ALIMENTACAO | REFEICAO | OUTRO
+  monthlyCents: integer("monthly_cents").notNull().default(0),
+  creditDay: integer("credit_day").notNull().default(1),
+  active: boolean("active").notNull().default(true),
+  /** Até que dia os créditos mensais já foram lançados. */
+  generatedUntil: date("generated_until", { mode: "string" }),
+  createdAt: createdAt(),
+}, (t) => [index("benefit_cards_user_idx").on(t.userId, t.active)]);
+
+/** Movimentos do vale: CREDITO (do mês ou saldo inicial), GASTO e AJUSTE (corrige o saldo; pode ser negativo). */
+export const benefitEntries = pgTable("benefit_entries", {
+  id: id(),
+  userId: userId(),
+  cardId: text("card_id").notNull().references(() => benefitCards.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  description: text("description").notNull(),
+  categoryKey: text("category_key").notNull().default("alimentacao"),
+  date: date("date", { mode: "string" }).notNull(),
+  /** Crédito automático do mês: a data dele (um por dia de crédito, sem repetir). */
+  creditRef: date("credit_ref", { mode: "string" }),
+  createdAt: createdAt(),
+}, (t) => [index("benefit_entries_card_idx").on(t.cardId, t.date), uniqueIndex("benefit_entries_credit_uq").on(t.cardId, t.creditRef)]);
+export type BenefitCard = typeof benefitCards.$inferSelect;
+
 export const cardPurchases = pgTable("card_purchases", {
   id: id(),
   userId: userId(),

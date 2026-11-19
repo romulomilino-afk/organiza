@@ -96,6 +96,8 @@ type UserCat = { key: string; name: string; kind: "EXPENSE" | "INCOME"; keywords
 let userCats: UserCat[] = [];
 type UserCard = { name: string; closingDay: number; dueDay: number; limitCents?: number | null; usedCents?: number };
 let userCardsList: UserCard[] = [];
+type UserBenefit = { name: string; kind: string; balanceCents: number; perDayCents: number; nextCredit: string; monthlyCents: number; creditDay: number };
+let userBenefitsList: UserBenefit[] = [];
 function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
   let best: { c: UserCat; n: number } | null = null;
   for (const c of userCats) if (c.kind === kind) for (const k of c.keywords) {
@@ -107,7 +109,7 @@ function matchUserCat(s: string, kind: "EXPENSE" | "INCOME"): UserCat | null {
 const catName = (key: string) => userCats.find((c) => c.key === key)?.name ?? CAT_NAME[key] ?? "Outros";
 
 export function fallbackNina(text: string, today: string, history: { lastUser?: string; lastAssistant?: string } = {},
-  opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[]; budget?: Budget | null; financeEnabled?: boolean; currency?: Currency; rates?: Rates | null } = {}): Out {
+  opts: { family?: boolean; categories?: UserCat[]; cards?: UserCard[]; benefits?: UserBenefit[]; budget?: Budget | null; financeEnabled?: boolean; currency?: Currency; rates?: Rates | null } = {}): Out {
   const sN = norm(text);
   // trocar a moeda em que a Nina trabalha: "trabalha em dólar", "muda minha moeda para euro"
   const swap = currencySwitch(text, sN, opts.currency ?? "BRL", history);
@@ -128,6 +130,7 @@ export function fallbackNina(text: string, today: string, history: { lastUser?: 
   }
   userCats = opts.categories ?? [];
   userCardsList = opts.cards ?? [];
+  userBenefitsList = opts.benefits ?? [];
   let out: Out;
   try { out = fallbackCore(text, today, history); } finally { userCats = []; userCardsList = []; }
   // valor dito em outra moeda: a ação leva a moeda e o app converte; a resposta mostra os dois valores
@@ -343,6 +346,62 @@ function purchaseMoney(raw: string): { total?: number; each?: number } {
   return m ? { total: Number(m[1].replace(",", ".")) } : {};
 }
 
+const BENEFIT = /(vale[ -]?(alimentacao|refeicao)|cartao[ -](alimentacao|refeicao|beneficio)|\b(no|com o|com|do|pelo|meu|o|de) (va|vr)\b|\b(alelo|sodexo|pluxee|ticket|vr beneficios|caju|swile|ben visa)\b)/;
+const BENEFIT_LABEL: Record<string, string> = { refeicao: "Vale-refeição", alimentacao: "Vale-alimentação" };
+function parseBenefit(raw: string, s: string): Out | null {
+  if (!BENEFIT.test(s)) return null;
+  const kind = /refeicao|\bvr\b/.test(s) ? "refeicao" : "alimentacao";
+  const brand = s.match(/\b(alelo|sodexo|pluxee|ticket|caju|swile)\b/)?.[1];
+  const pick = () => {
+    const l = userBenefitsList;
+    const byBrand = brand ? l.find((b) => norm(b.name).includes(brand)) : undefined;
+    const byKind = l.filter((b) => b.kind === (kind === "refeicao" ? "REFEICAO" : "ALIMENTACAO"));
+    return byBrand ?? (byKind.length === 1 ? byKind[0] : l.length === 1 ? l[0] : null);
+  };
+  const isBuy = /\b(comprei|gastei|paguei|passei|usei)\b/.test(s);
+  const t = raw.toLowerCase().replace(/(\d)\.(\d{3})/g, "$1$2");
+  const money = (x: string) => { const m = x.match(/r\$\s*(\d+(?:,\d{1,2})?)/) ?? x.match(/\b(\d+(?:,\d{1,2})?)\b/); return m ? Number(m[1].replace(",", ".")) : null; };
+  // saldo
+  if (!isBuy && /\bsaldo\b|quanto (eu )?(tenho|sobrou|resta|ainda tenho|falta)/.test(s) && !/\b(cai|recebo|todo dia)\b/.test(s)) {
+    const b = pick();
+    if (!b) return { reply: userBenefitsList.length ? `De qual vale? ${userBenefitsList.map((x) => x.name).join(" ou ")}?` : "Ainda não sei do seu vale. Me diga: “meu vale-refeição é de 800 e cai todo dia 1”. 🍴", actions: [] };
+    return { reply: `No ${b.name} você tem ${brl(b.balanceCents)}. Dá uns ${brl(b.perDayCents)} por dia até o próximo crédito, em ${fmtBR(b.nextCredit)}. 🍴`, actions: [] };
+  }
+  // gasto com o vale
+  if (isBuy) {
+    const amount = money(t.replace(/\bdia\s+\d{1,2}\b/g, " "));
+    if (!amount) return { reply: "Qual foi o valor?", actions: [] };
+    if (!userBenefitsList.length) return { reply: "Para eu tirar do saldo do vale, me diga ele primeiro: “meu vale-refeição é de 800 e cai todo dia 1”. 🍴", actions: [] };
+    const b = pick();
+    if (!b) return { reply: `Em qual vale? ${userBenefitsList.map((x) => x.name).join(" ou ")}?`, actions: [] };
+    const desc = raw.replace(/\b(comprei|gastei|paguei|passei|usei)\b/i, "")
+      .replace(/\b(com|no|na|pelo|pela|do|da|de)?\s*(o\s+|a\s+|meu\s+|minha\s+)?(vale[ -]?(alimenta[çc][ãa]o|refei[çc][ãa]o)|cart[ãa]o[ -](alimenta[çc][ãa]o|refei[çc][ãa]o|benef[íi]cio)|va|vr|alelo|sodexo|pluxee|ticket|caju|swile)\b/gi, " ")
+      .replace(/(r\$\s*)?\d+(?:[.,]\d+)*\s*(reais|real)?/gi, "").replace(/\b(hoje|ontem)\b/gi, "")
+      .replace(/^\s*(um|uma|o|a|de|no|na|em)\s+/i, "").replace(/\s+(de|por|em|com|no|na)\s*$/i, "").replace(/[.,!]+/g, "").replace(/\s{2,}/g, " ").trim();
+    let category = matchUserCat(s, "EXPENSE")?.key ?? guessCategory(s);
+    if (category === "outros") category = "alimentacao";
+    const description = cap(desc || (kind === "refeicao" ? "Refeição" : "Mercado"));
+    const after = b.balanceCents - toCents(amount);
+    return { reply: after >= 0
+        ? `Paguei com o ${b.name}: ${description}, ${brl(toCents(amount))}. Saldo agora: ${brl(after)}. Não saiu da sua receita. 🍴`
+        : `Lancei no ${b.name}, mas o saldo não cobria tudo: faltaram ${brl(-after)}. Se saiu do seu bolso, me diga “gastei ${(-after / 100).toFixed(2).replace(".", ",")} no ${description.toLowerCase()}”. 🍴`,
+      actions: [{ type: "add_benefit_spend", card: b.name, description, amount, category }] };
+  }
+  // cadastro: "meu vale-refeição é de 800 e cai todo dia 1", "recebo 600 de VA todo dia 5, saldo 320"
+  if (/\b(cai|recebo|ganho|credit\w*|deposit\w*|vem|todo dia|todo mes|por mes|mensal|e de|tenho)\b/.test(s)) {
+    const day = Number(s.match(/\bdia\s+(\d{1,2})\b/)?.[1] ?? 0) || null;
+    const balTxt = t.match(/saldo\s*(?:atual|de hoje|hoje)?\s*(?:de|e|é|:)?\s*(?:r\$\s*)?(\d+(?:,\d{1,2})?)/);
+    const balance = balTxt ? Number(balTxt[1].replace(",", ".")) : null;
+    const monthly = money(t.replace(/saldo[^,.;]*/g, " ").replace(/\bdia\s+\d{1,2}\b/g, " "));
+    if (!monthly && balance == null) return { reply: `Quanto cai no seu ${BENEFIT_LABEL[kind].toLowerCase()} por mês, e em que dia?`, actions: [] };
+    const name = brand ? cap(brand) : BENEFIT_LABEL[kind];
+    const d = day ?? 1;
+    return { reply: `Pronto! Cadastrei seu ${name}${monthly ? `: ${brl(toCents(monthly))} todo dia ${d}` : ""}. 🍴 Os gastos com ele saem do saldo do vale, não da sua receita.${day ? "" : " Coloquei o crédito no dia 1; se for outro dia, me diga “meu vale cai dia 5”."}${balance == null ? " Quanto tem de saldo hoje? Me diga “saldo do vale 350”." : ""}`,
+      actions: [{ type: "add_benefit_card", name, kind, monthly: monthly ?? undefined, day: d, balance: balance ?? undefined }] };
+  }
+  return null;
+}
+
 function parseCard(raw: string, s: string, today: string): Out | null {
   // pergunta: melhor dia de compra
   if (/melhor dia (de|pra|para) (compra|comprar)/.test(s)) {
@@ -505,6 +564,10 @@ function parseClause(text: string, today: string, history: { lastUser?: string; 
   const val = parseMoney(raw), date = parseDate(raw, today), time = parseTime(raw);
   const actions: Out["actions"] = [];
   const replies: string[] = [];
+
+  // vale-alimentação / vale-refeição: antes do cartão de crédito ("no cartão alimentação" não é crédito)
+  const benefitCmd = parseBenefit(raw, s);
+  if (benefitCmd) return benefitCmd;
 
   // cartão de crédito: cadastro, compras parceladas, fatura, melhor dia
   const cardCmd = parseCard(raw, s, today);

@@ -5,11 +5,12 @@
 import { and, eq, gt, gte, ilike, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import {
-  events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments, deadlines, shoppingRoutines, users,
+  benefitCards, benefitEntries, events, tasks, reminders, expenses, income, shoppingItems, recurringItems, subscriptions, warranties, documents, aiMemory, categories, creditCards, cardInstallments, deadlines, shoppingRoutines, users,
 } from "@/db/schema";
 import { completeDeadline, ensureRoutines, onBought, remindFrom, upsertRoutine } from "../watch";
 import { addPurchase, bestDay, cancelPurchase, payInvoice, pickCard, recomputeCard, userCards } from "../cards";
 import { ensureSubscriptionCharges, followingCharge, nextChargeFrom } from "../subscriptions";
+import { benefitBalance, BENEFIT_KIND, kindOf, nextCreditDate, pickBenefit, setBenefitBalance, userBenefits } from "../benefits";
 
 const normName = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 import type { Action } from "./actions";
@@ -311,6 +312,41 @@ async function runOne(db: DB, access: Access, today: string, a: Action, created:
         `${card.name} · ${n > 1 ? `${n}x de ${brl(r.parts[n - 1])}` : "à vista"} · ${cat.emoji} ${cat.name}`,
         n > 1 ? `1ª na fatura de ${fmtBR(r.firstDue)} · última em ${fmtBR(r.lastDue)}` : `Entra na fatura de ${fmtBR(r.firstDue)}`,
         ...(fx.note ? [fx.note] : []),
+      ] };
+    }
+    case "add_benefit_card": {
+      const kind = a.kind === "refeicao" ? "REFEICAO" : a.kind === "outro" ? "OUTRO" : "ALIMENTACAO";
+      const K = BENEFIT_KIND[kind];
+      const list = await userBenefits(db, userId);
+      const name = cap(a.name?.trim() || K.label);
+      let card = list.find((c) => normName(c.name) === normName(name)) ?? (!a.name ? list.find((c) => c.kind === kind) : undefined);
+      if (card) {
+        const patch: Partial<typeof benefitCards.$inferInsert> = {};
+        if (a.monthly) patch.monthlyCents = toCents(a.monthly);
+        if (a.day) patch.creditDay = a.day;
+        if (Object.keys(patch).length) [card] = await db.update(benefitCards).set(patch).where(eq(benefitCards.id, card.id)).returning();
+      } else {
+        if (list.length >= 6) return null;
+        [card] = await db.insert(benefitCards).values({ userId, name, kind, monthlyCents: a.monthly ? toCents(a.monthly) : 0, creditDay: a.day ?? 1, generatedUntil: today }).returning();
+      }
+      if (a.balance != null) await setBenefitBalance(db, userId, card, toCents(a.balance), today);
+      const bal = await benefitBalance(db, card.id);
+      return { icon: K.emoji, title: card.name, lines: [
+        card.monthlyCents ? `Recebe ${brl(card.monthlyCents)} todo dia ${card.creditDay} · próximo em ${fmtBR(nextCreditDate(today, card.creditDay))}` : "Me diga o valor e o dia do crédito para eu lançar todo mês",
+        `Saldo: ${brl(bal)} · não mexe na sua receita`,
+      ] };
+    }
+    case "add_benefit_spend": {
+      const card = pickBenefit(await userBenefits(db, userId), a.card);
+      if (!card) return null;
+      const cents = toCents(a.amount);
+      const catKey = (await cats()).resolve(a.category, a.description, "EXPENSE");
+      await db.insert(benefitEntries).values({ userId, cardId: card.id, kind: "GASTO", amountCents: cents, description: cap(a.description), categoryKey: catKey, date: a.date ?? today });
+      const bal = await benefitBalance(db, card.id);
+      const K = BENEFIT_KIND[kindOf(card.kind)];
+      return { icon: K.emoji, title: `${cap(a.description)} · ${brl(cents)}`, lines: [
+        `Pago com ${card.name} · não saiu da sua receita`,
+        bal >= 0 ? `Saldo do ${card.name}: ${brl(bal)}` : `⚠️ O saldo não cobria tudo: faltaram ${brl(-bal)}. Se saiu do seu bolso, me diga “gastei ${brl(-bal)} no ${cap(a.description).toLowerCase()}”`,
       ] };
     }
     case "pay_invoice": {

@@ -73,6 +73,10 @@ export const ActionSchema = z.discriminatedUnion("type", [
     installments: z.coerce.number().int().min(1).max(48).nullish().transform((v) => v ?? 1), date: optDay, category: z.string().default("outros"), currency: cur })
     .refine((a) => a.amount || a.installmentAmount, "compra precisa de amount ou installmentAmount"),
   z.object({ type: z.literal("pay_invoice"), card: txt(40).nullish() }),
+  // Vale-alimentação / vale-refeição (saldo próprio, não é receita nem despesa)
+  z.object({ type: z.literal("add_benefit_card"), name: txt(40).nullish(), kind: z.enum(["alimentacao", "refeicao", "outro"]).default("alimentacao"),
+    monthly: optReais, day: z.coerce.number().int().min(1).max(31).nullish(), balance: z.coerce.number().min(0).max(1_000_000).nullish() }),
+  z.object({ type: z.literal("add_benefit_spend"), card: txt(40).nullish(), description: txt(120), amount: reais, category: z.string().default("alimentacao"), date: optDay }),
   z.object({ type: z.literal("cancel_card_purchase"), id: idRef }),
   // Compras
   z.object({ type: z.literal("add_shopping"), items }),

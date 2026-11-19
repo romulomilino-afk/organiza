@@ -11,6 +11,7 @@ import { visible, type Access } from "../access";
 import { loadCategories } from "../data/user-categories";
 import { recentMonthsForNina, reserveBalance } from "../months";
 import { cardsOverview } from "../cards";
+import { benefitsOverview } from "../benefits";
 import { activeRoutines, openDeadlines } from "../watch";
 import { monthBudget } from "../budget";
 import { healthFor } from "../health";
@@ -33,7 +34,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     const d = addDays(today, i);
     calendario.push(`${d} = ${DIAS[weekday(d)]}${i === 0 ? " (HOJE)" : i === 1 ? " (amanhã)" : ""}`);
   }
-  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats, cards, dls, routines] = await Promise.all([
+  const [occ, recurring, tks, bills, shop, rems, mems, subs, fin, fixos, cats, cards, dls, routines, vales] = await Promise.all([
     occurrences(db, access, addDays(today, -1), addDays(today, 45)),
     db.select().from(events).where(and(visible(events, access), eq(events.cancelled, false))).limit(300),
     openTasks(db, access),
@@ -48,6 +49,7 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
     cardsOverview(db, user.id, today),
     openDeadlines(db, user.id),
     activeRoutines(db, access),
+    benefitsOverview(db, user.id, today),
   ]);
   const budget = hasFeature(access.plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
   const health = budget ? await healthFor(db, user.id, today, budget).catch(() => null) : null;
@@ -107,6 +109,11 @@ export async function buildContext(db: DB, user: User, access: Access, today: st
       fatura_aberta: c.open ? { vencimento: c.open.dueDate, fecha_em: c.open.closingDate, total_ate_agora: c.open.totalCents / 100 } : null,
       proximas_faturas: c.upcoming.map((i) => ({ vencimento: i.dueDate, total: i.totalCents / 100 })),
       compras_parceladas: c.purchases.slice(0, 25).map((p) => ({ id: p.purchaseId, descricao: p.description, parcela_atual: `${p.next}/${p.of}`, valor_parcela: p.amountCents / 100, faltam: p.remaining, ultima_fatura: p.lastDue })),
+    })),
+    vales: vales.map((v) => ({
+      nome: v.card.name, tipo: v.kind.label, saldo: v.balanceCents / 100, credito_mensal: v.card.monthlyCents / 100, dia_do_credito: v.card.creditDay,
+      proximo_credito: v.nextCredit, da_por_dia_ate_o_credito: v.perDayCents / 100, gasto_no_mes: v.spentCents / 100,
+      ultimos_gastos: v.entries.filter((e) => e.kind === "GASTO").slice(0, 10).map((e) => ({ descricao: e.description, valor: e.amountCents / 100, data: e.date })),
     })),
     fixos_do_mes: {
       itens: fixos.items.map((f) => ({ id: f.id, tipo: f.kind === "INCOME" ? "receita fixa" : f.kind === "EXPENSE" ? "despesa fixa (automática)" : "conta fixa (avisa para pagar)", name: f.name, amount: f.amountCents != null ? f.amountCents / 100 : null, dia: f.dayOfMonth, category: f.categoryKey })),

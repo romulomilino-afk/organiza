@@ -9,6 +9,7 @@ import { addDays, dateInMonth, addMonths, monthStart, monthEnd, todayIn } from "
 import { occursOn } from "../recurrence";
 import { monthCardSpend } from "../cards";
 import { ensureSubscriptionCharges } from "../subscriptions";
+import { ensureBenefitCredits } from "../benefits";
 
 export type Occurrence = { event: Event; day: string };
 
@@ -75,6 +76,8 @@ export async function ensureRecurringBills(db: DB, userId: string, today: string
   }
   // assinaturas com dia de cobrança: lançadas no dia (na conta ou no cartão)
   await ensureSubscriptionCharges(db, userId, today);
+  // vales da empresa: crédito do mês entra no saldo do vale (não é receita)
+  await ensureBenefitCredits(db, userId, today, tz);
 }
 
 /** Receitas, despesas e contas fixas ativas, com os totais do mês. */

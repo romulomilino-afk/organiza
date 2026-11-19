@@ -4,6 +4,7 @@
  *   limite do plano → salva mensagem → contexto → IA (ou regras) → validação → filtro do plano
  *   → executor (transação, escopo userId) → salva resposta → conta interação
  */
+import { benefitsOverview } from "../benefits";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { messages, usageCounters, type User } from "@/db/schema";
@@ -109,9 +110,10 @@ async function handleMessageInner(db: DB, user: User, text: string, source: "TEX
     const lastU = [...history].reverse().find((m) => m.role === "USER");
     const cats = await loadCategories(db, user.id);
     const cards = (await cardsOverview(db, user.id, today)).map((c) => ({ ...c.card, usedCents: c.usedCents }));
+    const benefits = (await benefitsOverview(db, user.id, today)).map((b) => ({ name: b.card.name, kind: b.card.kind, balanceCents: b.balanceCents, perDayCents: b.perDayCents, nextCredit: b.nextCredit, monthlyCents: b.card.monthlyCents, creditDay: b.card.creditDay }));
     const rates = currencyInText(text) || /cota[cç][aã]o|convert/i.test(text) ? await getRates(db, today) : null;
     const budget = /\b(posso|consigo|da pra|dá pra|quanto).{0,30}(gastar|comprar)/i.test(text) && hasFeature(plan, "financeiro") ? await monthBudget(db, user.id, today, user.timezone) : null;
-    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards, budget, financeEnabled: hasFeature(plan, "financeiro"), currency: (isCurrency(user.currency) ? user.currency : "BRL"), rates }));
+    out = parseNinaOutput(fallbackNina(text, today, { lastAssistant: lastA?.content, lastUser: lastU?.content }, { family: !!access.household?.active, categories: cats.list, cards, benefits, budget, financeEnabled: hasFeature(plan, "financeiro"), currency: (isCurrency(user.currency) ? user.currency : "BRL"), rates }));
   }
 
   const { allowed, note } = gateByPlan(plan, out.actions, !!access.trial && !access.trial.active);
