@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import { sendMetaEvent } from "@/lib/meta";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
@@ -60,6 +61,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
         // usuários criados via Google recebem o plano padrão do ambiente
         if (user.id) await db.update(users).set({ plan: defaultPlan() }).where(eq(users.id, user.id));
         log.info("auth.user_created", { userId: user.id, method: "oauth" });
+        if (user.id) await sendMetaEvent({ name: "CompleteRegistration", eventId: `lead-${user.id}`, userId: user.id, email: user.email });
       },
     },
   };

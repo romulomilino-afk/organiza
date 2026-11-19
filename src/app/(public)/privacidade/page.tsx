@@ -33,6 +33,7 @@ export default function PrivacyPage() {
         <p><b>O que você conta para a Nina:</b> mensagens, áudios, gastos, receitas, contas fixas, categorias, cartões e parcelas, tarefas, compromissos, lembretes, prazos, listas de compras e fatos que você pede para ela lembrar.</p>
         <p><b>Documentos:</b> arquivos que você guarda (como CNH ou comprovantes), armazenados criptografados.</p>
         <p><b>WhatsApp (opcional):</b> seu número e as mensagens que você envia para a Nina por lá.</p>
+        <p><b>Anúncios:</b> usamos o pixel e a API de Conversões da Meta (Facebook e Instagram) para saber quais anúncios trazem cadastros e assinaturas. Enviamos à Meta o tipo de evento (cadastro, início do teste, pagamento) com seu e-mail em formato embaralhado (hash), sem nada do que você registra no app. Você pode limitar isso nas configurações de anúncios da sua conta da Meta e bloqueando cookies de terceiros no navegador.</p>
         <p><b>Pagamento:</b> não guardamos número de cartão nem CPF. Esses dados são digitados direto na página segura do Asaas; nós guardamos apenas o plano e a situação da assinatura.</p>
         <p><b>Técnicos:</b> fuso horário, moeda escolhida, registros de acesso e de erro, e o endereço de notificações do aparelho (se você ativar os avisos).</p>
       </S>

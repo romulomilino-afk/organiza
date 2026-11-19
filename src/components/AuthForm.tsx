@@ -1,4 +1,5 @@
 "use client";
+import { metaTrack } from "@/components/MetaPixel";
 import { useState } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
@@ -47,6 +48,8 @@ export function AuthForm({ mode, googleEnabled, callbackUrl }: { mode: "login" |
       if (mode === "cadastro") {
         const res = await fetch("/api/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: fd.get("name"), email, password }) });
         if (!res.ok) { setError((await res.json().catch(() => ({}))).error ?? "Não consegui criar sua conta."); return; }
+        const { eventId } = await res.json().catch(() => ({} as { eventId?: string }));
+        metaTrack("CompleteRegistration", {}, eventId);
       }
       const r = await signIn("credentials", { email, password, redirect: false });
       if (!r || r.error) { setError("E-mail ou senha incorretos."); return; }

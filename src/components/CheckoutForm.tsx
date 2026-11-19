@@ -1,6 +1,7 @@
 "use client";
 import { useActionState, useState } from "react";
 import { checkoutAction, type CheckoutState } from "@/actions/billing";
+import { metaTrack } from "@/components/MetaPixel";
 
 type Method = "CREDIT_CARD" | "PIX" | "PIX_YEARLY";
 
@@ -27,7 +28,7 @@ export function CheckoutForm({ plan, label, monthly, yearly, yearlyPerMonth, nam
   const pix = method !== "CREDIT_CARD";
 
   return (
-    <form action={action} className="flex flex-col gap-2">
+    <form action={action} onSubmit={() => metaTrack("InitiateCheckout", { content_name: plan, currency: "BRL" })} className="flex flex-col gap-2">
       <input type="hidden" name="plan" value={plan} />
       <input type="hidden" name="method" value={method} />
       <div role="radiogroup" aria-label="Forma de pagamento" className="flex flex-col gap-2">

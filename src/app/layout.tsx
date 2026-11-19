@@ -7,6 +7,8 @@ import "@fontsource/figtree/600.css";
 import "@fontsource/figtree/700.css";
 import "./globals.css";
 import { RegisterSW } from "@/components/RegisterSW";
+import { MetaPixel } from "@/components/MetaPixel";
+import { META_PIXEL_ID } from "@/lib/meta";
 
 export const metadata: Metadata = {
   title: "Meu Organiza",
@@ -25,7 +27,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className="font-sans text-[16px] leading-normal min-h-dvh">{children}<RegisterSW /></body>
+      <body className="font-sans text-[16px] leading-normal min-h-dvh">{children}<RegisterSW /><MetaPixel pixelId={META_PIXEL_ID} /></body>
     </html>
   );
 }

@@ -9,6 +9,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { defaultPlan } from "@/lib/plans";
 import { ensureUserSetup } from "@/lib/data/user-setup";
 import { log } from "@/lib/logger";
+import { requestContext, sendMetaEvent } from "@/lib/meta";
 
 const schema = z.object({
   name: z.string().trim().min(1, "Informe seu nome").max(80),
@@ -32,5 +33,8 @@ export const POST = route("register", async (req: Request) => {
   const [u] = await db.insert(users).values({ name, email, passwordHash, plan: defaultPlan() }).returning({ id: users.id });
   await ensureUserSetup(db, u.id);
   log.info("auth.user_created", { userId: u.id, method: "password" });
-  return NextResponse.json({ ok: true }, { status: 201 });
+  // anúncios: cadastro (o navegador manda o mesmo evento com este id)
+  const eventId = `lead-${u.id}`;
+  await sendMetaEvent({ name: "CompleteRegistration", eventId, userId: u.id, email, url: "https://meuorganiza.com.br/cadastro", ...requestContext(req) });
+  return NextResponse.json({ ok: true, eventId }, { status: 201 });
 });

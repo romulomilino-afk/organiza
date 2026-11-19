@@ -16,6 +16,7 @@
  * Fluxo: /planos → (Pix: nome e CPF) → checkout ou assinatura → webhook PAYMENT_CONFIRMED/RECEIVED → plano ativado.
  * O CPF/CNPJ vai direto para o Asaas e NÃO é guardado no nosso banco.
  */
+import { sendMetaEvent } from "./meta";
 import { and, desc, eq, like, lt, ne, sql } from "drizzle-orm";
 import type { DB } from "@/db";
 import { billingEvents, billingSubscriptions, users, type User } from "@/db/schema";
@@ -248,7 +249,7 @@ export async function cancelBilling(db: DB, user: User, opts: { immediate?: bool
 
 type AsaasEvent = {
   id: string; event: string;
-  payment?: { id: string; subscription?: string; customer?: string; dueDate?: string; invoiceUrl?: string; status?: string; externalReference?: string | null; billingType?: string; checkoutSession?: string | null };
+  payment?: { id: string; value?: number; subscription?: string; customer?: string; dueDate?: string; invoiceUrl?: string; status?: string; externalReference?: string | null; billingType?: string; checkoutSession?: string | null };
   subscription?: { id: string; customer?: string; externalReference?: string | null; checkoutSession?: string | null };
   checkout?: { id: string; customer?: string | null; externalReference?: string | null };
 };
@@ -300,6 +301,9 @@ async function startTrial(db: DB, b: typeof billingSubscriptions.$inferSelect) {
   await db.update(billingSubscriptions).set({ status: "ACTIVE", currentPeriodEnd: b.trialEndsAt }).where(eq(billingSubscriptions.id, b.id));
   await db.update(users).set({ plan: b.plan }).where(eq(users.id, b.userId));
   log.info("billing.trial_started", { userId: b.userId, plan: b.plan, until: b.trialEndsAt });
+  // anúncios: começou o teste grátis com cartão (valor = o que será cobrado no 8º dia)
+  const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, b.userId)).limit(1);
+  await sendMetaEvent({ name: "StartTrial", eventId: `trial-${b.id}`, userId: b.userId, email: u?.email, valueCents: b.valueCents, url: "https://meuorganiza.com.br/planos" });
 }
 
 /** Processa um evento do webhook. Idempotente pelo id do evento. */
@@ -364,6 +368,15 @@ export async function handleAsaasEvent(db: DB, ev: AsaasEvent): Promise<"duplica
       }).where(eq(billingSubscriptions.id, b.id));
       await db.update(users).set({ plan: b.plan }).where(eq(users.id, b.userId));
       log.info("billing.activated", { userId: b.userId, plan: b.plan });
+      {
+        // anúncios: pagamento aprovado (Purchase sempre; Subscribe só no primeiro pagamento da assinatura)
+        const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, b.userId)).limit(1);
+        const cents = ev.payment?.value != null ? Math.round(ev.payment.value * 100) : b.valueCents;
+        const payId = ev.payment?.id ?? ev.id;
+        const first = !b.currentPeriodEnd || (!!b.trialEndsAt && b.currentPeriodEnd <= b.trialEndsAt);
+        await sendMetaEvent({ name: "Purchase", eventId: `pay-${payId}`, userId: b.userId, email: u?.email, valueCents: cents });
+        if (first) await sendMetaEvent({ name: "Subscribe", eventId: `sub-${b.id}`, userId: b.userId, email: u?.email, valueCents: cents });
+      }
       break;
     }
     case "PAYMENT_CREATED":
