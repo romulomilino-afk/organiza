@@ -60,7 +60,7 @@ function gateByPlan(plan: PlanId, actions: Action[], trialEnded = false) {
   }
   const msg = trialEnded
     ? "Seu teste grátis acabou, e essa parte (financeiro, documentos e mais) agora faz parte dos planos Premium e Família. Assine em Planos para continuar."
-    : "Essa parte (financeiro, assinaturas ou garantias) faz parte do plano Premium. Em Planos você pode testar 7 dias grátis.";
+    : "Cuidar do seu dinheiro (salário, gastos, contas, cartões e o “Posso gastar?”) faz parte do plano Premium. Dá para testar 7 dias grátis com tudo liberado: toque em “Testar grátis” aqui embaixo. 💚";
   return { allowed, note: blocked ? msg : "" };
 }
 
@@ -130,7 +130,8 @@ async function handleMessageInner(db: DB, user: User, text: string, source: "TEX
     }
   }
 
-  const reply = note ? `${out.reply} ${note}` : out.reply;
+  // nada do pedido pôde ser feito no plano atual: não diz "combinado", só explica o plano
+  const reply = !note ? out.reply : allowed.length ? `${out.reply} ${note}` : note;
   const [assistantMsg] = await db.insert(messages).values({
     conversationId, userId: user.id, role: "ASSISTANT", source: "SYSTEM", content: reply,
     actions: exec.executed, cards: exec.cards, suggestion, suggestionState: suggestion ? "PENDING" : null,
